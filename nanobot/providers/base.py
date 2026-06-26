@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -641,6 +642,37 @@ class LLMProvider(ABC):
             await on_content_delta(response.content)
         return response
 
+    def _log_llm_request(self, tag: str, **kwargs: Any) -> None:
+        """Log an LLM request at INFO level (summary) and DEBUG level (full payload)."""
+        model = kwargs.get("model") or self.get_default_model()
+        messages = kwargs.get("messages", [])
+        tools = kwargs.get("tools")
+        logger.info(">"*64)
+        logger.info(
+            "[LLM {} Request] model={} messages={} tools={} max_tokens={} "
+            "temperature={} reasoning_effort={} tool_choice={}",
+            tag, model, len(messages),
+            len(tools) if tools else 0,
+            kwargs.get("max_tokens"),
+            kwargs.get("temperature"),
+            kwargs.get("reasoning_effort"),
+            kwargs.get("tool_choice"),
+        )
+        logger.info("[LLM {} Request] messages={}", tag, messages)
+
+    def _log_llm_response(self, tag: str, model: str, response: LLMResponse, elapsed: float) -> None:
+        """Log an LLM response at INFO level (summary) and DEBUG level (full content)."""
+        logger.info(
+            "[LLM {} Response] model={} finish_reason={} usage={} tool_calls={} "
+            "content_len={} elapsed={:.2f}s",
+            tag, model, response.finish_reason,
+            response.usage, len(response.tool_calls),
+            len(response.content) if response.content else 0,
+            elapsed,
+        )
+        logger.info("[LLM {} Response] content={}", tag, response.content)
+        logger.info("<"*64)
+
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
         """Call chat_stream() and convert unexpected exceptions to error responses."""
         try:
@@ -699,7 +731,10 @@ class LLMProvider(ABC):
         )
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
-        return await self._run_with_retry(
+        resolved_model = model or self.get_default_model()
+        self._log_llm_request("Stream", **kw)
+        start = time.monotonic()
+        response = await self._run_with_retry(
             self._safe_chat_stream,
             kw,
             messages,
@@ -708,6 +743,8 @@ class LLMProvider(ABC):
             should_retry_guard=lambda: not has_streamed_content,
             on_stream_recover=_recover_stream if on_stream_recover else None,
         )
+        self._log_llm_response("Stream", resolved_model, response, time.monotonic() - start)
+        return response
 
     async def chat_with_retry(
         self,
@@ -742,13 +779,18 @@ class LLMProvider(ABC):
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
-        return await self._run_with_retry(
+        resolved_model = model or self.get_default_model()
+        self._log_llm_request("Chat", **kw)
+        start = time.monotonic()
+        response = await self._run_with_retry(
             self._safe_chat,
             kw,
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
         )
+        self._log_llm_response("Chat", resolved_model, response, time.monotonic() - start)
+        return response
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:

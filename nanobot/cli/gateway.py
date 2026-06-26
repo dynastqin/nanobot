@@ -12,6 +12,7 @@ import typer
 from loguru import logger
 from rich.console import Console
 
+from nanobot.cli.logfmt import LOG_FORMAT, log_patcher
 from nanobot.config.schema import Config
 from nanobot.gateway import (
     GatewayRuntime,
@@ -51,14 +52,10 @@ def create_gateway_app(
         if not verbose:
             return
         logger.remove(log_handler_id)
+        logger.configure(patcher=log_patcher)
         logger.add(
             sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
+            format=LOG_FORMAT,
             level="DEBUG",
             colorize=None,
             filter=lambda record: record["extra"].setdefault("channel", "-") or True,

@@ -25,14 +25,15 @@ from loguru import logger  # noqa: E402
 
 # Remove default handler and re-add with unified nanobot format
 logger.remove()
+
+from nanobot.cli.logfmt import LOG_FORMAT as _LOG_FORMAT  # noqa: E402
+from nanobot.cli.logfmt import log_patcher as _log_patcher  # noqa: E402
+
+logger.configure(patcher=_log_patcher)
+
 _log_handler_id = logger.add(
     sys.stderr,
-    format=(
-        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "<level>{level: <5}</level> | "
-        "<cyan>{extra[channel]}</cyan> | "
-        "<level>{message}</level>"
-    ),
+    format=_LOG_FORMAT,
     level="INFO",
     colorize=None,
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
@@ -792,6 +793,8 @@ def serve(
 # ============================================================================
 # Gateway / Server
 # ============================================================================
+
+
 
 
 def _run_gateway(
