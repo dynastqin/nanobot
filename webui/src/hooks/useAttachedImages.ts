@@ -53,6 +53,34 @@ const ACCEPTED_MIMES: ReadonlySet<string> = new Set([
   "image/gif",
 ]);
 
+/** Document MIME types supported by the backend ``extract_documents()`` pipeline.
+ *
+ * Exported so that ``useDocuments``, ``useClipboardAndDrop``, and the Composer
+ * can all reference a single source of truth. */
+export const DOCUMENT_MIMES: ReadonlySet<string> = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+  "application/xml",
+  "text/html",
+  "text/yaml",
+  "application/x-yaml",
+  "application/toml",
+  "text/x-toml",
+  "text/x-ini",
+  "text/x-config",
+]);
+
+/** Return ``true`` when ``mime`` matches a backend-supported document type. */
+export function isDocumentMime(mime: string): boolean {
+  return DOCUMENT_MIMES.has(mime);
+}
+
 function dataUrlMime(dataUrl: string): string {
   const match = /^data:([^;,]+)[;,]/.exec(dataUrl);
   return match?.[1] || "image/png";

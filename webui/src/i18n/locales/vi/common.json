@@ -825,6 +825,8 @@
         "drag": "Kéo để sắp xếp"
       },
       "attachImage": "Đính kèm ảnh",
+      "attachFile": "Đính kèm tệp",
+      "attachFileHint": "- Images: PNG, JPEG, WebP, GIF (max 4, 8 MB each)\n- Documents: PDF, DOCX, XLSX, PPTX, TXT, CSV, JSON, XML, HTML, YAML, TOML, INI, CONFIG (max 10, 50 MB each)",
       "imageMode": {
         "label": "Tạo ảnh",
         "toggle": "Bật/tắt chế độ tạo ảnh",
@@ -933,10 +935,11 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
       "imageRejected": {
         "unsupported_type": "Loại tệp không được hỗ trợ",
-        "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
+        "too_many_images": "Tối đa {{max}} tệp mỗi tin nhắn",
+        "too_many_documents": "Tối đa {{max}} tài liệu mỗi tin nhắn",
         "magic_mismatch": "Tệp này không phải là một ảnh thực",
-        "decode_failed": "Không thể giải mã ảnh này",
-        "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
+        "decode_failed": "Không thể đọc tệp này",
+        "too_large": "Tệp quá lớn — hãy thử tệp nhỏ hơn",
         "io": "Không thể đọc tệp này"
       },
       "mentions": {

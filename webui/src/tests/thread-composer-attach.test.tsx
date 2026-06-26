@@ -162,7 +162,7 @@ describe("ThreadComposer — image attachments", () => {
 
     await waitFor(() => {
       const chip = screen.getByTestId("composer-chip");
-      expect(chip.textContent ?? "").toMatch(/decode|image/i);
+      expect(chip.textContent ?? "").toMatch(/read|file/i);
     });
 
     const textarea = screen.getByLabelText(/message input/i);

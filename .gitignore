@@ -86,6 +86,7 @@ Desktop.ini
 *.swo
 *~
 nano.*.save
+.codegraph/
 
 # Environment & secrets (keep examples tracked if needed)
 .env.*

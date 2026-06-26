@@ -825,6 +825,8 @@
         "drag": "拖曳排序"
       },
       "attachImage": "附加圖片",
+      "attachFile": "附加檔案",
+      "attachFileHint": "- 圖片：PNG、JPEG、WebP、GIF（最多 4 張，單張 8 MB）\n- 文件：PDF、DOCX、XLSX、PPTX、TXT、CSV、JSON、XML、HTML、YAML、TOML、INI、CONFIG（最多 10 個，單個 50 MB）",
       "imageMode": {
         "label": "圖片生成",
         "toggle": "切換圖片生成模式",
@@ -933,10 +935,11 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
       "imageRejected": {
         "unsupported_type": "不支援的檔案類型",
-        "too_many_images": "每則訊息最多 {{max}} 張圖片",
+        "too_many_images": "每則訊息最多 {{max}} 個檔案",
+        "too_many_documents": "每則訊息最多 {{max}} 個文件",
         "magic_mismatch": "檔案看起來不像真正的圖片",
-        "decode_failed": "無法解碼這張圖片",
-        "too_large": "圖片太大，請換一張小一點的",
+        "decode_failed": "無法讀取這個檔案",
+        "too_large": "檔案太大，請換一個小一點的",
         "io": "無法讀取這個檔案"
       },
       "mentions": {

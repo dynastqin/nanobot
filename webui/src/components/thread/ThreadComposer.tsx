@@ -27,6 +27,7 @@ import {
   ChevronUp,
   CircleHelp,
   CornerDownRight,
+  FileIcon,
   GripVertical,
   History,
   ImageIcon,
@@ -58,6 +59,8 @@ import {
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
+  DOCUMENT_MIMES,
+  isDocumentMime,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
@@ -65,6 +68,11 @@ import {
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import {
+  useDocuments,
+  type AttachedDocument,
+  type DocumentAttachmentError,
+} from "@/hooks/useDocuments";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
@@ -84,9 +92,16 @@ import {
 } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
-/** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
- * deliberately excluded to avoid an embedded-script XSS surface. */
-const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
+/** ``<input accept>``: image + document MIME types aligned with the server's
+ * whitelist. SVG is deliberately excluded to avoid an embedded-script XSS
+ * surface. */
+const ACCEPT_ATTR = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  ...DOCUMENT_MIMES,
+].join(",");
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
@@ -837,8 +852,17 @@ export function ThreadComposer({
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages();
 
+  const {
+    documents,
+    enqueue: enqueueDocs,
+    remove: removeDoc,
+    clear: clearDocs,
+    encoding: docsEncoding,
+    full: docsFull,
+  } = useDocuments();
+
   const formatRejection = useCallback(
-    (reason: AttachmentError): string => {
+    (reason: AttachmentError | DocumentAttachmentError): string => {
       const key = `thread.composer.imageRejected.${reason}`;
       return t(key, { max: MAX_IMAGES_PER_MESSAGE });
     },
@@ -848,14 +872,25 @@ export function ThreadComposer({
   const addFiles = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
-      const { rejected } = enqueue(files);
-      if (rejected.length > 0) {
-        setInlineError(formatRejection(rejected[0].reason));
+      const imageFiles: File[] = [];
+      const docFiles: File[] = [];
+      for (const file of files) {
+        if (isDocumentMime(file.type)) {
+          docFiles.push(file);
+        } else {
+          imageFiles.push(file);
+        }
+      }
+      const imgRejected = imageFiles.length > 0 ? enqueue(imageFiles).rejected : [];
+      const docRejected = docFiles.length > 0 ? enqueueDocs(docFiles).rejected : [];
+      const allRejected = [...imgRejected, ...docRejected];
+      if (allRejected.length > 0) {
+        setInlineError(formatRejection(allRejected[0].reason));
       } else {
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection],
+    [enqueue, enqueueDocs, formatRejection],
   );
 
   const {
@@ -881,13 +916,22 @@ export function ThreadComposer({
     ),
     [images],
   );
-  const hasErrors = images.some((img) => img.status === "error");
+  const readyDocuments = useMemo(
+    () => documents.filter((doc): doc is AttachedDocument & { dataUrl: string } =>
+      doc.status === "ready" && typeof doc.dataUrl === "string",
+    ),
+    [documents],
+  );
+  const hasErrors = images.some((img) => img.status === "error")
+    || documents.some((doc) => doc.status === "error");
 
-  const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
+  const totalMedia = readyImages.length + readyDocuments.length;
+  const hasComposerContent = value.trim().length > 0 || totalMedia > 0;
   const canSend =
     !disabled
     && !modelNeedsSetup
     && !encoding
+    && !docsEncoding
     && !hasErrors
     && hasComposerContent;
   const canOpenModelSettings = Boolean(modelNeedsSetup && onModelBadgeClick && !disabled);
@@ -896,6 +940,7 @@ export function ThreadComposer({
     && !disabled
     && !modelNeedsSetup
     && !encoding
+    && !docsEncoding
     && !hasErrors
     && hasComposerContent
     && !value.trimStart().startsWith("/");
@@ -1161,13 +1206,14 @@ export function ThreadComposer({
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
     clear();
+    clearDocs();
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
     });
-  }, [clear, pendingQueueKey]);
+  }, [clear, clearDocs, pendingQueueKey]);
 
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
@@ -1290,7 +1336,7 @@ export function ThreadComposer({
 
   const queueGuidancePrompt = useCallback(() => {
     const text = value.trim();
-    if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
+    if (!canQueueGuidance || (!text && readyImages.length === 0 && readyDocuments.length === 0)) return;
     const queuedImages = readyImagesToQueuedImages(readyImages);
     queuedPromptCounterRef.current += 1;
     setQueuedPrompts((items) => [
@@ -1302,8 +1348,9 @@ export function ThreadComposer({
       },
     ]);
     clear();
+    clearDocs();
     clearComposerText();
-  }, [canQueueGuidance, clear, clearComposerText, readyImages, value]);
+  }, [canQueueGuidance, clear, clearDocs, clearComposerText, readyDocuments, readyImages, value]);
 
   const removeQueuedPrompt = useCallback((id: string) => {
     setQueuedPrompts((items) => items.filter((item) => item.id !== id));
@@ -1398,20 +1445,25 @@ export function ThreadComposer({
     if (!canSend) return;
     const trimmed = value.trim();
     const content = trimmed;
-    // Share the same normalized ``data:`` URL with both the wire payload and
-    // the optimistic bubble preview: data URLs are self-contained (no blob
-    // lifetime, safe under React StrictMode double-mount) and keep the
-    // bubble in sync with whatever the backend actually sees.
+    // Merge images + documents into a single media array. Images and documents
+    // share the ``OutboundMedia { data_url, name }`` wire format.
+    const imagePayload: SendImage[] = readyImages.map((img) => ({
+      media: {
+        data_url: img.dataUrl,
+        name: img.file.name,
+      },
+      preview: { url: img.dataUrl, name: img.file.name },
+    }));
+    const docPayload: SendImage[] = readyDocuments.map((doc) => ({
+      media: {
+        data_url: doc.dataUrl,
+        name: doc.file.name,
+      },
+      preview: { url: "", name: doc.file.name },
+    }));
+    const merged = [...imagePayload, ...docPayload];
     const payload: SendImage[] | undefined =
-      readyImages.length > 0
-        ? readyImages.map((img) => ({
-            media: {
-              data_url: img.dataUrl,
-              name: img.file.name,
-            },
-            preview: { url: img.dataUrl, name: img.file.name },
-          }))
-        : undefined;
+      merged.length > 0 ? merged : undefined;
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
@@ -1426,16 +1478,19 @@ export function ThreadComposer({
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
+    clearDocs();
     clearComposerText();
   }, [
     activeCliMentionApps,
     activeMcpPresetMentions,
     canSend,
     clear,
+    clearDocs,
     clearComposerText,
     modelNeedsSetup,
     onModelBadgeClick,
     onSend,
+    readyDocuments,
     readyImages,
     value,
   ]);
@@ -1527,6 +1582,22 @@ export function ThreadComposer({
     [remove],
   );
 
+  const removeDocChip = useCallback(
+    (id: string) => {
+      const { nextFocusId } = removeDoc(id);
+      setInlineError(null);
+      requestAnimationFrame(() => {
+        const el = nextFocusId ? chipRefs.current.get(nextFocusId) : null;
+        if (el) {
+          el.focus();
+        } else {
+          textareaRef.current?.focus();
+        }
+      });
+    },
+    [removeDoc],
+  );
+
   const onChipKey = useCallback(
     (id: string) => (e: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (
@@ -1542,7 +1613,22 @@ export function ThreadComposer({
     [removeChip],
   );
 
-  const attachButtonDisabled = disabled || full;
+  const onDocChipKey = useCallback(
+    (id: string) => (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if (
+        e.key === "Delete" ||
+        e.key === "Backspace" ||
+        e.key === "Enter" ||
+        e.key === " "
+      ) {
+        e.preventDefault();
+        removeDocChip(id);
+      }
+    },
+    [removeDocChip],
+  );
+
+  const attachButtonDisabled = disabled || (full && docsFull);
   const showVoiceButton = Boolean(onTranscribeAudio);
   const voiceRecordingStatusLabel = t("thread.composer.voice.recordingStatus", {
     time: voiceRecorder.elapsedLabel,
@@ -1561,7 +1647,7 @@ export function ThreadComposer({
         ? t("thread.composer.voice.transcribing")
         : t("thread.composer.voice.hint");
   const showStopButton = isStreaming && !!onStop;
-  const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
+  const relaxedHeroInput = isHero && images.length === 0 && documents.length === 0 && !isStreaming;
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
     isHero
@@ -1643,10 +1729,10 @@ export function ThreadComposer({
             }}
           />
         ) : null}
-        {images.length > 0 ? (
+        {images.length > 0 || documents.length > 0 ? (
           <div
             className="flex flex-wrap gap-2 px-3 pt-3"
-            aria-label={t("thread.composer.attachImage")}
+            aria-label={t("thread.composer.attachFile")}
           >
             {images.map((img) => (
               <AttachmentChip
@@ -1666,6 +1752,21 @@ export function ThreadComposer({
                 registerRef={(el) => {
                   if (el) chipRefs.current.set(img.id, el);
                   else chipRefs.current.delete(img.id);
+                }}
+              />
+            ))}
+            {documents.map((doc) => (
+              <DocumentChip
+                key={doc.id}
+                document={doc}
+                labelRemove={t("thread.composer.remove")}
+                labelEncoding={t("thread.composer.encoding")}
+                formatError={formatRejection}
+                onRemove={() => removeDocChip(doc.id)}
+                onKeyDown={onDocChipKey(doc.id)}
+                registerRef={(el) => {
+                  if (el) chipRefs.current.set(doc.id, el);
+                  else chipRefs.current.delete(doc.id);
                 }}
               />
             ))}
@@ -1736,22 +1837,35 @@ export function ThreadComposer({
               hidden
               onChange={onFilePick}
             />
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              disabled={attachButtonDisabled}
-              aria-label={t("thread.composer.attachImage")}
-              onClick={() => fileInputRef.current?.click()}
-              className={cn(
-                "rounded-full text-muted-foreground hover:text-foreground",
-                isHero
-                  ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
-                  : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
-              )}
-            >
-              <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
-            </Button>
+            <TooltipProvider delayDuration={350} skipDelayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={attachButtonDisabled}
+                    aria-label={t("thread.composer.attachFile")}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={cn(
+                      "rounded-full text-muted-foreground hover:text-foreground",
+                      isHero
+                        ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                        : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+                    )}
+                  >
+                    <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent
+                  side="top"
+                  align="center"
+                  className="max-w-[22rem] whitespace-pre-line rounded-xl border border-border/70 bg-background px-3 py-2 text-[12.5px] leading-relaxed text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-neutral-900 dark:text-white"
+                >
+                  {t("thread.composer.attachFileHint")}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -2519,6 +2633,81 @@ function AttachmentChip({
         <span className="truncate text-muted-foreground">
           {image.status === "error" && image.error
             ? formatError(image.error)
+            : sizeLabel}
+        </span>
+      </div>
+      <button
+        type="button"
+        ref={registerRef}
+        onClick={onRemove}
+        onKeyDown={onKeyDown}
+        aria-label={labelRemove}
+        className={cn(
+          "ml-1 grid h-5 w-5 flex-none place-items-center rounded-full",
+          "text-muted-foreground/80 hover:bg-foreground/8 hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
+        )}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+interface DocumentChipProps {
+  document: AttachedDocument;
+  labelRemove: string;
+  labelEncoding: string;
+  formatError: (reason: DocumentAttachmentError) => string;
+  onRemove: () => void;
+  onKeyDown: (e: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  registerRef: (el: HTMLButtonElement | null) => void;
+}
+
+/** Attachment chip for document files — shows a file icon instead of a visual
+ *  preview, plus filename and size. */
+function DocumentChip({
+  document: doc,
+  labelRemove,
+  labelEncoding,
+  formatError,
+  onRemove,
+  onKeyDown,
+  registerRef,
+}: DocumentChipProps) {
+  const sizeLabel = formatBytes(doc.file.size);
+  const tone =
+    doc.status === "error"
+      ? "border-destructive/40 bg-destructive/5 text-destructive"
+      : "border-border/70 bg-muted/60";
+
+  return (
+    <div
+      className={cn(
+        "group relative flex items-center gap-2 rounded-[12px] border px-2 py-1.5",
+        "transition-colors motion-reduce:transition-none",
+        tone,
+      )}
+      data-testid="composer-chip"
+    >
+      <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-background">
+        <FileIcon className="h-5 w-5 text-muted-foreground" aria-hidden />
+        {doc.status === "encoding" ? (
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-background/60"
+            aria-label={labelEncoding}
+          >
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+          </div>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-col text-[11.5px] leading-4">
+        <span className="max-w-[min(14rem,calc(100vw-8rem))] truncate font-medium" title={doc.file.name}>
+          {doc.file.name}
+        </span>
+        <span className="truncate text-muted-foreground">
+          {doc.status === "error" && doc.error
+            ? formatError(doc.error)
             : sizeLabel}
         </span>
       </div>

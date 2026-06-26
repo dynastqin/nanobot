@@ -825,6 +825,8 @@
         "drag": "Seret untuk mengurutkan"
       },
       "attachImage": "Lampirkan gambar",
+      "attachFile": "Lampirkan file",
+      "attachFileHint": "- Images: PNG, JPEG, WebP, GIF (max 4, 8 MB each)\n- Documents: PDF, DOCX, XLSX, PPTX, TXT, CSV, JSON, XML, HTML, YAML, TOML, INI, CONFIG (max 10, 50 MB each)",
       "imageMode": {
         "label": "Buat gambar",
         "toggle": "Alihkan mode pembuatan gambar",
@@ -933,10 +935,11 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Tipe file tidak didukung",
-        "too_many_images": "Maksimal {{max}} gambar per pesan",
+        "too_many_images": "Maksimal {{max}} file per pesan",
+        "too_many_documents": "Maksimal {{max}} dokumen per pesan",
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
-        "decode_failed": "Tidak dapat mendekode gambar ini",
-        "too_large": "Gambar terlalu besar — coba yang lebih kecil",
+        "decode_failed": "Tidak dapat membaca file ini",
+        "too_large": "File terlalu besar — coba yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {

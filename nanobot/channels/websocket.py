@@ -82,11 +82,10 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
-    # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
-    # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
-    # (base64 overhead) + envelope framing stays under 36 MB; the 40 MB ceiling
-    # leaves a small margin for sender slop without opening a DoS avenue.
-    max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
+    # Default 72 MB — sized for one large document (50 MB × 1.37 base64 overhead
+    # + framing) or the legacy 4-image payload.  Upper ceiling 700 MB leaves room
+    # for multiple document attachments while still bounding ingress.
+    max_message_bytes: int = Field(default=75_497_472, ge=1024, le=734_003_200)
     ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
@@ -215,10 +214,15 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
 # client's ``Worker`` normalization target (6 MB) — tolerate client slop, but
 # still cap total ingress at ``_MAX_IMAGES_PER_MESSAGE * _MAX_IMAGE_BYTES``
 # which fits comfortably inside ``max_message_bytes``.
+# Documents bypass Worker normalization and are base64-encoded directly by the
+# client, so their cap (``_MAX_DOCUMENTS_PER_MESSAGE * _MAX_DOCUMENT_BYTES``)
+# can be much larger.
 _MAX_IMAGES_PER_MESSAGE = 4
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _MAX_VIDEOS_PER_MESSAGE = 1
 _MAX_VIDEO_BYTES = 20 * 1024 * 1024
+_MAX_DOCUMENTS_PER_MESSAGE = 10
+_MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 
 # Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
 # explicitly excluded to avoid the XSS surface inside embedded scripts.
@@ -235,7 +239,28 @@ _VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
     "video/quicktime",
 })
 
-_UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
+_DOCUMENT_MIME_ALLOWED: frozenset[str] = frozenset({
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/xml",
+    "text/html",
+    "text/yaml",
+    "application/x-yaml",
+    "application/toml",
+    "text/x-toml",
+    "text/x-ini",
+    "text/x-config",
+})
+
+_UPLOAD_MIME_ALLOWED: frozenset[str] = (
+    _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED | _DOCUMENT_MIME_ALLOWED
+)
 
 _DATA_URL_MIME_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,", re.DOTALL)
 
@@ -587,16 +612,21 @@ class WebSocketChannel(BaseChannel):
         """
         image_count = 0
         video_count = 0
+        document_count = 0
         for item in media:
             mime = _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
             if mime in _VIDEO_MIME_ALLOWED:
                 video_count += 1
             elif mime in _IMAGE_MIME_ALLOWED:
                 image_count += 1
+            elif mime in _DOCUMENT_MIME_ALLOWED:
+                document_count += 1
         if image_count > _MAX_IMAGES_PER_MESSAGE:
             return [], "too_many_images"
         if video_count > _MAX_VIDEOS_PER_MESSAGE:
             return [], "too_many_videos"
+        if document_count > _MAX_DOCUMENTS_PER_MESSAGE:
+            return [], "too_many_documents"
 
         media_dir = get_media_dir("websocket")
         paths: list[str] = []
@@ -623,7 +653,13 @@ class WebSocketChannel(BaseChannel):
             if mime not in _UPLOAD_MIME_ALLOWED:
                 return _abort("mime")
             is_video = mime in _VIDEO_MIME_ALLOWED
-            max_bytes = _MAX_VIDEO_BYTES if is_video else _MAX_IMAGE_BYTES
+            is_document = mime in _DOCUMENT_MIME_ALLOWED
+            if is_document:
+                max_bytes = _MAX_DOCUMENT_BYTES
+            elif is_video:
+                max_bytes = _MAX_VIDEO_BYTES
+            else:
+                max_bytes = _MAX_IMAGE_BYTES
             try:
                 saved = save_base64_data_url(
                     data_url, media_dir, max_bytes=max_bytes,

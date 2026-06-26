@@ -1,13 +1,18 @@
 import { useCallback, useRef, useState } from "react";
 
-/** Extract image ``File``s from a paste / drop event.
+import { isDocumentMime } from "@/hooks/useAttachedImages";
+
+/** Check whether a MIME type is an accepted attachment (image or document). */
+function isAcceptedAttachMime(mime: string): boolean {
+  return mime.startsWith("image/") || isDocumentMime(mime);
+}
+
+/** Extract attachable ``File``s from a paste event.
  *
- * Deliberate behaviour:
- *   - Only items whose ``kind === "file"`` and ``type`` starts with
- *     ``image/`` are returned; ``<img>`` tags inside HTML fragments are
- *     ignored (defending against remote URL fetch + XSS surfaces).
- *   - Plain text pasted alongside images is *not* consumed by this helper,
- *     so the caller can still let the textarea receive it naturally.
+ * Accepts image files (``image/*``) and backend-supported document types.
+ * ``<img>`` tags inside HTML fragments are ignored (defending against remote
+ * URL fetch + XSS surfaces).  Plain text pasted alongside files is *not*
+ * consumed so the caller can still let the textarea receive it naturally.
  */
 export function extractImageFilesFromPaste(
   event: ClipboardEvent | React.ClipboardEvent,
@@ -18,14 +23,14 @@ export function extractImageFilesFromPaste(
   const files: File[] = [];
   for (const item of Array.from(clipboard.items)) {
     if (item.kind !== "file") continue;
-    if (!item.type.startsWith("image/")) continue;
+    if (!isAcceptedAttachMime(item.type)) continue;
     const file = item.getAsFile();
     if (file) files.push(file);
   }
   return files;
 }
 
-/** Extract dropped image files, mirroring ``extractImageFilesFromPaste``. */
+/** Extract dropped attachable files, mirroring ``extractImageFilesFromPaste``. */
 export function extractImageFilesFromDrop(
   event: DragEvent | React.DragEvent,
 ): File[] {
@@ -34,7 +39,7 @@ export function extractImageFilesFromDrop(
   if (!dt) return [];
   const files: File[] = [];
   for (const item of Array.from(dt.files)) {
-    if (item.type.startsWith("image/")) files.push(item);
+    if (isAcceptedAttachMime(item.type)) files.push(item);
   }
   return files;
 }
@@ -58,7 +63,7 @@ export interface UseClipboardAndDropApi {
  * text cursor inside a textarea fires ``dragleave`` on entry, flicking the
  * highlight off otherwise). */
 export function useClipboardAndDrop(
-  onImageFiles: (files: File[]) => void,
+  onAttachableFiles: (files: File[]) => void,
 ): UseClipboardAndDropApi {
   const [isDragging, setIsDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -67,12 +72,12 @@ export function useClipboardAndDrop(
     (event: React.ClipboardEvent) => {
       const files = extractImageFilesFromPaste(event);
       if (files.length === 0) return;
-      // Consume only when an image is actually present; plain-text paste still
+      // Consume only when a file is actually present; plain-text paste still
       // reaches the textarea unmolested.
       event.preventDefault();
-      onImageFiles(files);
+      onAttachableFiles(files);
     },
-    [onImageFiles],
+    [onAttachableFiles],
   );
 
   const onDragEnter = useCallback((event: React.DragEvent) => {
@@ -102,9 +107,9 @@ export function useClipboardAndDrop(
       const files = extractImageFilesFromDrop(event);
       if (files.length === 0) return;
       event.preventDefault();
-      onImageFiles(files);
+      onAttachableFiles(files);
     },
-    [onImageFiles],
+    [onAttachableFiles],
   );
 
   return { isDragging, onPaste, onDragEnter, onDragOver, onDragLeave, onDrop };

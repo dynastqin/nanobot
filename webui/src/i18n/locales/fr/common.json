@@ -825,6 +825,8 @@
         "drag": "Faire glisser pour réordonner"
       },
       "attachImage": "Joindre une image",
+      "attachFile": "Joindre un fichier",
+      "attachFileHint": "- Images: PNG, JPEG, WebP, GIF (max 4, 8 MB each)\n- Documents: PDF, DOCX, XLSX, PPTX, TXT, CSV, JSON, XML, HTML, YAML, TOML, INI, CONFIG (max 10, 50 MB each)",
       "imageMode": {
         "label": "Génération d’image",
         "toggle": "Activer ou désactiver le mode génération d’image",
@@ -933,10 +935,11 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Type de fichier non pris en charge",
-        "too_many_images": "Maximum {{max}} images par message",
+        "too_many_images": "Maximum {{max}} fichiers par message",
+        "too_many_documents": "Maximum {{max}} documents par message",
         "magic_mismatch": "Ce fichier n'est pas une image",
-        "decode_failed": "Impossible de décoder cette image",
-        "too_large": "Image trop grande — essayez-en une plus petite",
+        "decode_failed": "Impossible de lire ce fichier",
+        "too_large": "Fichier trop volumineux — essayez-en un plus petit",
         "io": "Impossible de lire ce fichier"
       },
       "mentions": {
