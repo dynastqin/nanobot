@@ -3,6 +3,7 @@ import {
   useEffect,
   forwardRef,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -57,6 +58,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { createPortal } from "react-dom";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -510,6 +512,128 @@ function pendingRestartSectionsFromPayload(payload: SettingsPayload): PendingRes
     browser: sections.includes("browser"),
     image: sections.includes("image"),
   };
+}
+
+const BOT_ICON_OPTIONS = [
+  { emoji: "🐈", label: "猫" },
+  { emoji: "🐱", label: "猫脸" },
+  { emoji: "🐶", label: "狗" },
+  { emoji: "🐕", label: "狗（侧）" },
+  { emoji: "🐩", label: "贵宾犬" },
+  { emoji: "🦊", label: "狐狸" },
+  { emoji: "🐼", label: "熊猫" },
+  { emoji: "🐨", label: "考拉" },
+  { emoji: "🐯", label: "老虎" },
+  { emoji: "🦁", label: "狮子" },
+  { emoji: "🐮", label: "牛" },
+  { emoji: "🐷", label: "猪" },
+  { emoji: "🐸", label: "青蛙" },
+  { emoji: "🐒", label: "猴子" },
+  { emoji: "🐰", label: "兔子" },
+  { emoji: "🐹", label: "仓鼠" },
+  { emoji: "🐭", label: "老鼠" },
+  { emoji: "🦝", label: "浣熊" },
+  { emoji: "🐻", label: "熊" },
+  { emoji: "🐻‍❄️", label: "北极熊" },
+  { emoji: "🐺", label: "狼" },
+  { emoji: "🐦", label: "鸟" },
+  { emoji: "🐤", label: "小鸡" },
+  { emoji: "🐧", label: "企鹅" },
+  { emoji: "🦉", label: "猫头鹰" },
+  { emoji: "🦅", label: "鹰" },
+  { emoji: "🦆", label: "鸭子" },
+  { emoji: "🦜", label: "鹦鹉" },
+  { emoji: "🐔", label: "鸡" },
+  { emoji: "🦩", label: "火烈鸟" },
+  { emoji: "🐢", label: "龟" },
+  { emoji: "🐍", label: "蛇" },
+  { emoji: "🐬", label: "海豚" },
+  { emoji: "🐳", label: "鲸鱼" },
+  { emoji: "🦈", label: "鲨鱼" },
+  { emoji: "🐙", label: "章鱼" },
+  { emoji: "🐝", label: "蜜蜂" },
+  { emoji: "🦋", label: "蝴蝶" },
+  { emoji: "🐞", label: "瓢虫" },
+  { emoji: "🐜", label: "蚂蚁" },
+  { emoji: "👻", label: "幽灵" },
+  { emoji: "👾", label: "像素怪" },
+  { emoji: "💀", label: "骷髅" },
+];
+
+function BotIconPicker({ value, onChange }: { value: string; onChange: (icon: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (popoverRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPopoverStyle({
+      position: "fixed",
+      top: rect.bottom + 4,
+      left: rect.left,
+      zIndex: 50,
+    });
+  }, [open]);
+
+  return (
+    <div ref={triggerRef} className="relative flex items-center gap-1.5">
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-[120px] rounded-full text-center text-[13px]"
+        placeholder="🐈"
+      />
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="选择图标"
+        onClick={() => setOpen((v) => !v)}
+        className="h-7 w-7 shrink-0 rounded-lg"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </Button>
+      {open && createPortal(
+        <div
+          ref={popoverRef}
+          style={popoverStyle}
+          className="w-[264px] rounded-xl border border-border bg-popover p-2 shadow-xl"
+        >
+          <div className="grid max-h-[240px] grid-cols-6 gap-0.5 overflow-y-auto">
+            {BOT_ICON_OPTIONS.map(({ emoji, label }) => (
+              <button
+                key={emoji}
+                type="button"
+                title={label}
+                onClick={() => { onChange(emoji); setOpen(false); }}
+                className={cn(
+                  "flex flex-col items-center rounded-lg px-1 py-1.5 text-[13px] transition-colors hover:bg-accent",
+                  value === emoji && "bg-accent",
+                )}
+              >
+                <span className="text-lg leading-none">{emoji}</span>
+                <span className="mt-0.5 text-[10px] leading-none text-muted-foreground">{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
 export function SettingsView({
@@ -5994,10 +6118,9 @@ function RuntimeSettings({
             />
           </SettingsRow>
           <SettingsRow title={tx("settings.rows.botIcon", "Bot icon")} description={tx("settings.help.botIcon", "Short emoji or text shown with the bot name.")}>
-            <Input
+            <BotIconPicker
               value={form.botIcon}
-              onChange={(event) => setForm((prev) => ({ ...prev, botIcon: event.target.value }))}
-              className="h-8 w-[120px] rounded-full text-center text-[13px]"
+              onChange={(icon) => setForm((prev) => ({ ...prev, botIcon: icon }))}
             />
           </SettingsRow>
           <SettingsRow title={tx("settings.rows.timezone", "Timezone")} description={tx("settings.help.timezone", "Used for schedules and time-aware replies.")}>

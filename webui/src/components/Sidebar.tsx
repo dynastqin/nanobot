@@ -57,6 +57,8 @@ interface SidebarProps {
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
+  botName?: string;
+  botIcon?: string;
 }
 
 type NavigatorWithUserAgentData = Navigator & {
@@ -100,27 +102,36 @@ export function Sidebar(props: SidebarProps) {
           collapsed ? "w-14 justify-start" : "justify-between",
         )}
       >
-        <button
-          type="button"
-          aria-label={collapsed ? toggleLabel : undefined}
-          aria-hidden={collapsed ? undefined : true}
-          title={collapsed ? toggleLabel : undefined}
-          onClick={collapsed ? props.onExpand : undefined}
-          tabIndex={collapsed ? 0 : -1}
+        <div
           className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl transition-colors",
-            collapsed
-              ? "-ml-0.5 hover:bg-sidebar-accent/75"
-              : "pointer-events-none -ml-0.5",
+            "flex items-center gap-2 overflow-hidden",
+            collapsed ? "w-9 justify-start" : "min-w-0 flex-1",
           )}
         >
-          <img
-            src="/brand/nanobot_icon.png"
-            alt=""
-            className="h-8 w-8 select-none object-contain"
-            draggable={false}
-          />
-        </button>
+          <button
+            type="button"
+            aria-label={collapsed ? toggleLabel : undefined}
+            aria-hidden={collapsed ? undefined : true}
+            title={collapsed ? toggleLabel : undefined}
+            onClick={collapsed ? props.onExpand : undefined}
+            tabIndex={collapsed ? 0 : -1}
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl transition-colors",
+              collapsed
+                ? "-ml-0.5 hover:bg-sidebar-accent/75"
+                : "pointer-events-none -ml-0.5",
+            )}
+          >
+            <span className="select-none text-[28px] leading-none">
+              {props.botIcon || "🐈"}
+            </span>
+          </button>
+          {!collapsed && props.botName && (
+            <span className="truncate text-sm font-medium text-orange-400">
+              {props.botName}
+            </span>
+          )}
+        </div>
         {!collapsed && !props.hostChromeInset && (
           <Button
             variant="ghost"

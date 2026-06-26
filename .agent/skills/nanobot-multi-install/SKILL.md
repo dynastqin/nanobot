@@ -19,6 +19,7 @@ description: 在 Linux 系统上安装和配置 nanobot 多实例运行环境，
 2. 创建共享 venv 并安装 nanobot
 3. 安装 nanobotx 管理脚本
 4. 验证安装
+5. 升级 Nanobot（后续维护）
 
 ## 步骤 1：收集用户偏好
 
@@ -123,6 +124,33 @@ nanobotx help
 nanobotx list
 ```
 
+## 步骤 6：升级 Nanobot
+
+共享 venv 中升级 nanobot 会影响所有实例。升级前建议先停止所有运行中的实例。
+
+```bash
+# 停止所有运行中的实例
+nanobotx stop
+
+# 激活共享 venv
+source "$NANOBOT_APP/app/bin/activate"
+
+# 升级 nanobot-ai（版本号有变化时使用 --upgrade）
+pip install --upgrade --extra-index-url http://pypi.yowant.link:8080/simple/ --trusted-host pypi.yowant.link nanobot-ai
+
+# 如果版本号未变（同版本重发布），需改用 --force-reinstall --no-deps（避免重装所有依赖）
+pip install --force-reinstall --no-deps --extra-index-url http://pypi.yowant.link:8080/simple/ --trusted-host pypi.yowant.link nanobot-ai
+
+# 验证版本
+nanobot --version
+
+# 退出 venv
+deactivate
+
+# 重新启动需要的实例
+nanobotx start <instance-name>
+```
+
 ## 使用示例
 
 ### 创建实例
@@ -162,6 +190,14 @@ nanobotx status work
 
 # 停止实例
 nanobotx stop work
+
+# 重启实例
+nanobotx restart work
+
+# 启动/停止/重启全部实例（不传 name）
+nanobotx start
+nanobotx stop
+nanobotx restart
 ```
 
 ### 访问 WebUI
@@ -180,7 +216,7 @@ nanobotx stop work
 
 ```bash
 # 永久删除实例（会删除所有数据）
-nanobotx destroy test
+nanobotx destory test
 ```
 
 ## 目录结构
@@ -273,4 +309,4 @@ sudo dnf install -y jq
 
 此技能包含：
 
-- **scripts/nanobotx**: 多实例管理工具，提供 create、start、stop、destroy、list 和 status 命令
+- **scripts/nanobotx**: 多实例管理工具，提供 create、start、stop、restart、destory、list 和 status 命令。start/stop/restart 不传名称时操作全部实例。

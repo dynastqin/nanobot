@@ -1415,6 +1415,8 @@ function Shell({
     showArchived: sidebarState.view.show_archived,
     archivedCount: sidebarState.archived_keys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
+    botName: settingsSnapshot?.agent.bot_name,
+    botIcon: settingsSnapshot?.agent.bot_icon,
   };
   const hostSidebarCollapsed = showHostChrome && !hostSidebarOpen;
   const showHostSidebarPreview =

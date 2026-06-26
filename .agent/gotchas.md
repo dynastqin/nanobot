@@ -2,7 +2,7 @@
 
 ## Do not use `ruff format`
 
-`CONTRIBUTING.md` mentions `ruff format`, but **do not run it** — it destroys git blame history. Only `ruff check` should be used.
+`CONTRIBUTING.md` mentions `ruff format`, but **do not run it** — it destorys git blame history. Only `ruff check` should be used.
 
 ## Config `${VAR}` References
 

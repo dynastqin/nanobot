@@ -12,8 +12,7 @@ Behaviour:
 - No-op when `webui/package.json` is absent (e.g. installing from an sdist that
   already contains a prebuilt `nanobot/web/dist/`).
 - Skips when `NANOBOT_SKIP_WEBUI_BUILD=1` is set.
-- Skips when `nanobot/web/dist/index.html` already exists, unless
-  `NANOBOT_FORCE_WEBUI_BUILD=1` is set.
+- Always rebuilds the webui frontend on every build (no cache check).
 - Uses `bun` when available, otherwise falls back to `npm`. The chosen tool
   performs `install` followed by `run build`.
 """
@@ -55,14 +54,6 @@ class WebUIBuildHook(BuildHookInterface):
         if not package_json.is_file():
             self.app.display_info(
                 "[webui-build] no webui/ source tree, assuming prebuilt nanobot/web/dist/"
-            )
-            return
-
-        force = os.environ.get("NANOBOT_FORCE_WEBUI_BUILD") == "1"
-        if index_html.is_file() and not force:
-            self.app.display_info(
-                f"[webui-build] reusing existing build at {dist_dir} "
-                "(set NANOBOT_FORCE_WEBUI_BUILD=1 to rebuild)"
             )
             return
 
