@@ -104,7 +104,8 @@
       "apps": "Apps",
       "nativeHost": "Native host",
       "hostSafety": "App safety",
-      "voiceInput": "Voice input"
+      "voiceInput": "Voice input",
+      "channels": "Channels"
     },
     "models": {
       "selectModel": "Select model",
@@ -636,6 +637,21 @@
       "selectProvider": "Select provider",
       "configureProvider": "Configure provider",
       "languageAuto": "Auto"
+    },
+    "channels": {
+      "running": "Running",
+      "stopped": "Stopped",
+      "disabled": "Disabled",
+      "domain": "Domain",
+      "loading": "Loading channel details...",
+      "openDetails": "Open details for {{name}}",
+      "detailDescription": "Details for {{name}}.",
+      "ipAddress": "IP",
+      "machineInfo": "Machine",
+      "lastHeartbeat": "Heartbeat",
+      "lastInput": "Last Input",
+      "instances": "instance(s)",
+      "connectedInstances": "Connected Instances"
     }
   },
   "chat": {

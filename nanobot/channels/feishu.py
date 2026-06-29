@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import re
+import socket
 import threading
 import time
 import uuid
@@ -601,6 +602,9 @@ class FeishuChannel(BaseChannel):
         self._bot_open_id: str | None = None
         self._background_tasks: set[asyncio.Task] = set()
         self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
+        self._started_at: float = 0.0
+        self._last_event_at: float = 0.0
+        self._last_message_at: float = 0.0
 
     # ------------------------------------------------------------------
     # QR login — writes credentials directly to config.json
@@ -686,6 +690,7 @@ class FeishuChannel(BaseChannel):
         redirect_lib_logging("Lark")
 
         self._running = True
+        self._started_at = time.time()
         self._loop = asyncio.get_running_loop()
 
         # Create Lark client for sending messages
@@ -801,28 +806,80 @@ class FeishuChannel(BaseChannel):
 
     def _fetch_bot_open_id(self) -> str | None:
         """Fetch the bot's own open_id via GET /open-apis/bot/v3/info."""
+        info = self.get_bot_info()
+        return info.get("open_id") if info else None
+
+    def get_bot_info(self) -> dict | None:
+        """Fetch bot info via bot/v3/info. Cached for 5 minutes."""
+        import time
+
+        now = time.monotonic()
+        if hasattr(self, "_bot_info_cache") and now - self._bot_info_cache[0] < 300:
+            return self._bot_info_cache[1]
+        result = self._do_fetch_bot_info()
+        self._bot_info_cache = (now, result)
+        return result
+
+    def _do_fetch_bot_info(self) -> dict | None:
+        """Call /open-apis/bot/v3/info and return the bot dict."""
         try:
+            import json
+
             import lark_oapi as lark
 
-            request = (
+            req = (
                 lark.BaseRequest.builder()
                 .http_method(lark.HttpMethod.GET)
                 .uri("/open-apis/bot/v3/info")
                 .token_types({lark.AccessTokenType.APP})
                 .build()
             )
-            response = self._client.request(request)
+            response = self._client.request(req)
             if response.success():
-                import json
-
                 data = json.loads(response.raw.content)
-                bot = (data.get("data") or data).get("bot") or data.get("bot") or {}
-                return bot.get("open_id")
+                return (data.get("data") or data).get("bot") or data.get("bot") or {}
             self.logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
             return None
         except Exception as e:
             self.logger.warning("Error fetching bot info: {}", e)
             return None
+
+    def get_instances(self) -> list[dict[str, Any]]:
+        """Return connection metadata for the bot's WebSocket link to Feishu/Lark."""
+        if not self._running:
+            return []
+        domain_label = self.config.domain or "feishu"
+        ip = ""
+        machine_info = f"Feishu / Lark ({domain_label})"
+        # Try to extract local/remote addresses from the lark WS client.
+        ws_client = self._ws_client
+        if ws_client is not None:
+            conn = getattr(ws_client, "_conn", None)
+            if conn is not None:
+                local = getattr(conn, "local_address", None)
+                remote = getattr(conn, "remote_address", None)
+                if isinstance(local, tuple) and local:
+                    ip = local[0]
+                parts: list[str] = []
+                hostname = ""
+                try:
+                    hostname = socket.gethostname()
+                except Exception:
+                    pass
+                if hostname:
+                    parts.append(hostname)
+                if isinstance(remote, tuple) and remote:
+                    parts.append(f"→ {remote[0]}")
+                if parts:
+                    machine_info = " / ".join(parts)
+        return [{
+            "client_id": f"bot@{domain_label}",
+            "ip": ip,
+            "machine_info": machine_info,
+            "connected_at": self._started_at,
+            "last_heartbeat": self._last_event_at,
+            "last_input": self._last_message_at,
+        }]
 
     @staticmethod
     def _resolve_mentions(text: str, mentions: list[MentionEvent] | None) -> str:
@@ -2113,6 +2170,7 @@ class FeishuChannel(BaseChannel):
         Sync handler for incoming messages (called from WebSocket thread).
         Schedules async handling in the main event loop.
         """
+        self._last_event_at = time.time()
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
@@ -2264,6 +2322,7 @@ class FeishuChannel(BaseChannel):
                 session_key = None
 
             # Forward to message bus
+            self._last_message_at = time.time()
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
                 sender_id=sender_id,

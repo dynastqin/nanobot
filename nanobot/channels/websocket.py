@@ -7,6 +7,7 @@ import hmac
 import json
 import re
 import ssl
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
@@ -309,6 +310,9 @@ class WebSocketChannel(BaseChannel):
         self._conn_chats: dict[Any, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
         self._conn_default: dict[Any, str] = {}
+        # connection -> metadata (ip, user_agent, client_id, connected_at,
+        # last_heartbeat, last_input).
+        self._conn_meta: dict[Any, dict[str, Any]] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -342,6 +346,7 @@ class WebSocketChannel(BaseChannel):
             if not subs:
                 self._subs.pop(cid, None)
         self._conn_default.pop(connection, None)
+        self._conn_meta.pop(connection, None)
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -545,6 +550,20 @@ class WebSocketChannel(BaseChannel):
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())
+        now = time.time()
+        remote_addr = getattr(connection, "remote_address", None)
+        ip = remote_addr[0] if isinstance(remote_addr, tuple) and remote_addr else ""
+        ua = ""
+        if request and hasattr(request, "headers"):
+            ua = request.headers.get("User-Agent", "")
+        self._conn_meta[connection] = {
+            "client_id": client_id,
+            "ip": ip,
+            "user_agent": ua,
+            "connected_at": now,
+            "last_heartbeat": now,
+            "last_input": 0.0,
+        }
 
         try:
             await connection.send(
@@ -563,6 +582,11 @@ class WebSocketChannel(BaseChannel):
             await self._hydrate_after_subscribe(default_chat_id)
 
             async for raw in connection:
+                # Any frame from the client counts as a heartbeat.
+                meta = self._conn_meta.get(connection)
+                if meta:
+                    meta["last_heartbeat"] = time.time()
+
                 if isinstance(raw, bytes):
                     try:
                         raw = raw.decode("utf-8")
@@ -581,6 +605,8 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
+                if meta:
+                    meta["last_input"] = time.time()
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=default_chat_id,
@@ -757,6 +783,11 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(connection, "error", detail="missing content")
                 return
 
+            # Track last input time for this connection.
+            meta = self._conn_meta.get(connection)
+            if meta:
+                meta["last_input"] = time.time()
+
             raw_media = envelope.get("media")
             media_paths: list[str] = []
             if raw_media is not None:
@@ -851,6 +882,49 @@ class WebSocketChannel(BaseChannel):
                 **({"chat_id": chat_id} if chat_id else {}),
             )
             return None
+
+    # -- Instance listing ----------------------------------------------------
+
+    def get_instances(self) -> list[dict[str, Any]]:
+        """Return metadata for every currently connected WebSocket client."""
+        result: list[dict[str, Any]] = []
+        for _conn, meta in self._conn_meta.items():
+            entry = dict(meta)
+            # Parse user_agent into a short os/host label
+            ua = meta.get("user_agent", "")
+            entry["machine_info"] = self._format_machine_info(meta.get("ip", ""), ua)
+            entry.pop("user_agent", None)
+            result.append(entry)
+        return result
+
+    @staticmethod
+    def _format_machine_info(ip: str, ua: str) -> str:
+        """Extract a short machine label from User-Agent header (IP is a separate field)."""
+        if not ua:
+            return "unknown"
+        # Try to detect OS from User-Agent
+        os_label = ""
+        if "Windows NT" in ua:
+            m = re.search(r"Windows NT (\d+\.\d+)", ua)
+            os_label = f"Windows {m.group(1)}" if m else "Windows"
+        elif "Mac OS X" in ua or "macOS" in ua:
+            m = re.search(r"Mac OS X ([0-9_]+)", ua)
+            if m:
+                os_label = "macOS " + m.group(1).replace("_", ".")
+            else:
+                os_label = "macOS"
+        elif "Linux" in ua and "Android" not in ua:
+            m = re.search(r"Linux ([^\s;)]+)", ua)
+            os_label = f"Linux {m.group(1)}" if m else "Linux"
+        elif "Android" in ua:
+            m = re.search(r"Android (\d+[^\s;)]*)", ua)
+            os_label = f"Android {m.group(1)}" if m else "Android"
+        elif "iPhone" in ua or "iPad" in ua:
+            m = re.search(r"OS (\d+[_\d]*)", ua)
+            os_label = f"iOS {m.group(1).replace('_', '.')}" if m else "iOS"
+        elif "CrOS" in ua:
+            os_label = "ChromeOS"
+        return os_label or "unknown"
 
     # -- Outbound WebSocket events -----------------------------------------
 

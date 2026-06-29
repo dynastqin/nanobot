@@ -104,7 +104,8 @@
       "apps": "应用",
       "nativeHost": "原生宿主",
       "hostSafety": "应用安全",
-      "voiceInput": "语音识别"
+      "voiceInput": "语音识别",
+      "channels": "通道"
     },
     "models": {
       "selectModel": "选择模型",
@@ -636,6 +637,21 @@
       "selectProvider": "选择提供商",
       "configureProvider": "配置提供商",
       "languageAuto": "自动"
+    },
+    "channels": {
+      "running": "运行中",
+      "stopped": "已停止",
+      "disabled": "已禁用",
+      "domain": "域名",
+      "loading": "正在加载频道详情…",
+      "openDetails": "查看 {{name}} 详情",
+      "detailDescription": "{{name}} 频道详情",
+      "ipAddress": "IP 地址",
+      "machineInfo": "客户端信息",
+      "lastHeartbeat": "上次心跳",
+      "lastInput": "最后输入",
+      "instances": "个实例",
+      "connectedInstances": "已连接实例"
     }
   },
   "chat": {

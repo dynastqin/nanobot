@@ -69,6 +69,7 @@ class WebUISettingsRouter:
         error_response: Callable[[int, str | None], Response],
         runtime_surface: str,
         runtime_capabilities: dict[str, Any],
+        channel_manager: Any | None = None,
     ) -> None:
         self.bus = bus
         self.logger = logger
@@ -79,6 +80,7 @@ class WebUISettingsRouter:
         self._runtime_surface = runtime_surface
         self._runtime_capabilities = runtime_capabilities
         self._restart_sections: set[str] = set()
+        self._channel_manager = channel_manager
 
     async def dispatch(self, request: WsRequest, path: str) -> Response | None:
         if path == "/api/settings":
@@ -121,6 +123,12 @@ class WebUISettingsRouter:
             return await self._handle_settings_mcp_presets(request)
         if path == "/api/settings/version-check":
             return await self._handle_settings_version_check(request)
+        if path == "/api/settings/channels":
+            return self._handle_settings_channels(request)
+        if path.startswith("/api/settings/channels/"):
+            name = path.split("/api/settings/channels/", 1)[1]
+            if name and name != "channels":
+                return self._handle_settings_channel_detail(request, name)
         mcp_action = _MCP_PRESET_ACTIONS_BY_PATH.get(path)
         if mcp_action is not None:
             return await self._handle_settings_mcp_presets(request, mcp_action)
@@ -368,3 +376,19 @@ class WebUISettingsRouter:
         return self._json_response({
             "updateAvailable": update_info,
         })
+
+    def _handle_settings_channels(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return self._error_response(401, None)
+        if self._channel_manager is None:
+            return self._json_response({"channels": []})
+        return self._json_response({"channels": self._channel_manager.get_all_channels_status()})
+
+    def _handle_settings_channel_detail(self, request: WsRequest, name: str) -> Response:
+        if not self._check_api_token(request):
+            return self._error_response(401, None)
+        if self._channel_manager is None:
+            return self._json_response({"bot_info": None, "instances": None})
+        bot_info = self._channel_manager.get_channel_bot_info(name)
+        instances = self._channel_manager.get_channel_instances(name)
+        return self._json_response({"bot_info": bot_info, "instances": instances})

@@ -80,11 +80,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
   createModelConfiguration,
   fetchAutomations,
+  fetchChannelDetail,
+  fetchChannelsStatus,
   fetchSettings,
   fetchSettingsUsage,
   fetchCliApps,
@@ -106,6 +109,9 @@ import {
   updateSettings,
   updateTranscriptionSettings,
   updateWebSearchSettings,
+  type ChannelBotInfo,
+  type ChannelInstance,
+  type ChannelStatus,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { getHostApi } from "@/lib/runtime";
@@ -1605,6 +1611,7 @@ export function SettingsView({
             requiresRestart={hasPendingRestart}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
+            token={token}
           />
         );
       case "appearance":
@@ -2025,16 +2032,291 @@ function SettingsSidebar({
   );
 }
 
+function ChannelsSection({ token, base }: { token: string; base?: string }) {
+  const { t } = useTranslation();
+  const [channels, setChannels] = useState<ChannelStatus[] | null>(null);
+  const [selected, setSelected] = useState<ChannelStatus | null>(null);
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+
+  useEffect(() => {
+    fetchChannelsStatus(token, base ?? "")
+      .then((r) => setChannels(r.channels))
+      .catch(() => setChannels([]));
+  }, [token, base]);
+
+  if (!channels?.length) return null;
+
+  return (
+    <section>
+      <SettingsSectionTitle>{tx("settings.sections.channels", "Channels")}</SettingsSectionTitle>
+      <SettingsGroup>
+        {channels.map((ch) => {
+          const isEnabled = ch.enabled;
+          const isRunning = ch.running;
+          const dot = isRunning ? "bg-green-500" : isEnabled ? "bg-yellow-500" : "bg-muted-foreground/40";
+          const status = isRunning
+            ? tx("settings.channels.running", "Running")
+            : isEnabled
+              ? tx("settings.channels.stopped", "Stopped")
+              : tx("settings.channels.disabled", "Disabled");
+          const configParts: string[] = [];
+          if (ch.config?.app_id) configParts.push(`App ID: ${ch.config.app_id}`);
+          if (ch.config?.domain && ch.config.domain !== "feishu")
+            configParts.push(ch.config.domain);
+          if (ch.config?.bot_token) configParts.push(`Token: ${ch.config.bot_token}`);
+          const caption = configParts.length ? configParts.join(" · ") : ch.name;
+          return (
+            <button
+              key={ch.name}
+              type="button"
+              aria-label={tx("settings.channels.openDetails", "Open details for {{name}}").replace(
+                "{{name}}",
+                ch.display_name,
+              )}
+              onClick={() => setSelected(ch)}
+              className="flex min-h-[62px] w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted/60">
+                <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+              </div>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-medium leading-5 text-foreground">
+                  {ch.display_name}
+                </span>
+                <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">
+                  {caption}
+                </span>
+              </span>
+              <span className="text-[13px] text-muted-foreground">{status}</span>
+            </button>
+          );
+        })}
+      </SettingsGroup>
+      <ChannelDetailSheet
+        channel={selected}
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
+      />
+    </section>
+  );
+}
+
+function formatRelativeTime(ts: number): string {
+  if (!ts || ts <= 0) return "n/a";
+  const diff = Math.max(0, (Date.now() - ts * 1000) / 1000);
+  if (diff < 60) return "<1min";
+  const mins = Math.floor(diff / 60);
+  if (mins < 60) return `${mins}min`;
+  const hours = Math.floor(mins / 60);
+  const remainMin = mins % 60;
+  if (hours < 24) return remainMin > 0 ? `${hours}h ${remainMin}min` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainH = hours % 24;
+  return remainH > 0 ? `${days}d ${remainH}h` : `${days}d`;
+}
+
+function ChannelDetailSheet({
+  channel,
+  open,
+  onOpenChange,
+}: {
+  channel: ChannelStatus | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { token } = useClient();
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [botInfo, setBotInfo] = useState<ChannelBotInfo | null>(null);
+  const [instances, setInstances] = useState<ChannelInstance[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || !channel) return;
+    let cancelled = false;
+    setBotInfo(null);
+    setInstances(null);
+    setLoading(true);
+    fetchChannelDetail(token, channel.name)
+      .then((r) => {
+        if (!cancelled) {
+          setBotInfo(r.bot_info);
+          setInstances(r.instances);
+        }
+      })
+      .catch(() => {
+        /* swallow — bot info is optional */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, channel, token]);
+
+  if (!channel) return null;
+
+  const isRunning = channel.running;
+  const statusLabel = isRunning
+    ? tx("settings.channels.running", "Running")
+    : tx("settings.channels.stopped", "Stopped");
+  const statusDot = isRunning ? "bg-green-500" : "bg-muted-foreground/40";
+
+  const avatarUrl = botInfo?.avatar_url;
+  const titleName = botInfo?.app_name || channel.display_name;
+
+  const metaItems: { label: string; value: string }[] = [];
+  if (channel.config?.app_id) metaItems.push({ label: "App ID", value: channel.config.app_id });
+  if (botInfo?.open_id) metaItems.push({ label: "Open ID", value: botInfo.open_id });
+  if (channel.config?.domain)
+    metaItems.push({ label: tx("settings.channels.domain", "Domain"), value: channel.config.domain });
+  if (channel.config?.bot_token)
+    metaItems.push({ label: "Bot Token", value: channel.config.bot_token });
+
+  const hasInstances = instances && instances.length > 0;
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-[min(34rem,calc(100vw-1rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="flex items-start gap-3 pr-8">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[15px] bg-muted/70 text-muted-foreground">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={titleName} className="h-full w-full object-cover" />
+              ) : (
+                <Waves className="h-5 w-5" strokeWidth={1.8} aria-hidden />
+              )}
+            </div>
+            <div className="min-w-0">
+              <SheetTitle className="truncate text-[20px] font-semibold">{titleName}</SheetTitle>
+              <SheetDescription className="sr-only">
+                {tx("settings.channels.detailDescription", "Details for {{name}}.").replace(
+                  "{{name}}",
+                  titleName,
+                )}
+              </SheetDescription>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+                <span className="inline-flex max-w-full items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  {channel.name}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    isRunning
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+                  {statusLabel}
+                </span>
+                {hasInstances && (
+                  <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {instances!.length}{" "}
+                    {tx("settings.channels.instances", "instance(s)")}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              {tx("settings.channels.loading", "Loading channel details...")}
+            </div>
+          ) : metaItems.length > 0 ? (
+            <div className="mt-7 grid grid-cols-2 gap-2">
+              {metaItems.map(({ label, value }) => (
+                <div key={label} className="rounded-[16px] bg-muted/35 px-3 py-2.5">
+                  <div className="text-[11px] text-muted-foreground">{label}</div>
+                  <div className="mt-0.5 truncate font-mono text-[12px] font-medium text-foreground">
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {hasInstances && (
+            <div className="mt-7">
+              <h4 className="mb-3 text-[13px] font-medium text-foreground">
+                {tx("settings.channels.connectedInstances", "Connected Instances")}
+              </h4>
+              <div className="flex flex-col gap-2">
+                {instances!.map((inst, i) => (
+                  <div
+                    key={inst.client_id || i}
+                    className="rounded-[16px] bg-muted/35 px-4 py-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="truncate text-[13px] font-medium text-foreground">
+                        {inst.client_id}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                      <div>
+                        <span className="text-muted-foreground">
+                          {tx("settings.channels.ipAddress", "IP")}:
+                        </span>{" "}
+                        <span className="font-mono text-foreground">
+                          {inst.ip || "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">
+                          {tx("settings.channels.machineInfo", "Machine")}:
+                        </span>{" "}
+                        <span className="text-foreground">
+                          {inst.machine_info || "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">
+                          {tx("settings.channels.lastHeartbeat", "Heartbeat")}:
+                        </span>{" "}
+                        <span className="text-foreground">
+                          {formatRelativeTime(inst.last_heartbeat)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">
+                          {tx("settings.channels.lastInput", "Last Input")}:
+                        </span>{" "}
+                        <span className="text-foreground">
+                          {formatRelativeTime(inst.last_input)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function OverviewSettings({
   settings,
   requiresRestart,
   onSelectSection,
   showBrandLogos,
+  token,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
+  token: string;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -2178,6 +2460,8 @@ function OverviewSettings({
           />
         </SettingsGroup>
       </section>
+
+      <ChannelsSection token={token} />
 
       <section>
         <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>

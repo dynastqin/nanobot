@@ -27,6 +27,7 @@ class GatewayServices:
     session_manager: Any | None
     cron_service: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
+    channel_manager: Any | None = None
 
 
 def build_gateway_services(
@@ -43,6 +44,7 @@ def build_gateway_services(
     disabled_skills: set[str] | None = None,
     cron_service: Any | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+    channel_manager: Any | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -71,6 +73,7 @@ def build_gateway_services(
         disabled_skills=disabled_skills,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
+        channel_manager=channel_manager,
         log=logger,
     )
     return GatewayServices(
@@ -82,4 +85,5 @@ def build_gateway_services(
         session_manager=session_manager,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
+        channel_manager=channel_manager,
     )

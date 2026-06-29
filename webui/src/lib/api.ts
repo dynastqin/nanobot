@@ -671,3 +671,57 @@ export async function updateTranscriptionSettings(
     token,
   );
 }
+
+export interface ChannelStatus {
+  name: string;
+  display_name: string;
+  enabled: boolean;
+  running: boolean;
+  config?: Record<string, string>;
+}
+
+export interface ChannelInstance {
+  client_id: string;
+  ip: string;
+  machine_info: string;
+  connected_at: number;
+  last_heartbeat: number;
+  last_input: number;
+}
+
+export interface ChannelBotInfo {
+  open_id?: string;
+  app_name?: string;
+  avatar_url?: string;
+  activate_status?: number;
+}
+
+export interface ChannelDetailResponse {
+  bot_info: ChannelBotInfo | null;
+  instances: ChannelInstance[] | null;
+}
+
+export async function fetchChannelsStatus(
+  token: string,
+  base: string = "",
+): Promise<{ channels: ChannelStatus[] }> {
+  return request<{ channels: ChannelStatus[] }>(
+    `${base}/api/settings/channels`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchChannelDetail(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<ChannelDetailResponse> {
+  return request<ChannelDetailResponse>(
+    `${base}/api/settings/channels/${encodeURIComponent(name)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}

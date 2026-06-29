@@ -129,6 +129,7 @@ class ChannelManager:
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
                         cron_service=self._cron_service,
                         cron_pending_job_ids=self._webui_cron_pending_job_ids,
+                        channel_manager=self,
                         logger=logger,
                     )
                     kwargs["gateway"] = gateway
@@ -481,11 +482,111 @@ class ChannelManager:
         """Get status of all channels."""
         return {
             name: {
+                "name": name,
+                "display_name": channel.display_name,
                 "enabled": True,
-                "running": channel.is_running
+                "running": channel.is_running,
             }
             for name, channel in self.channels.items()
         }
+
+    def _extract_channel_config_summary(self, name: str, config: Any) -> dict[str, Any]:
+        """Extract key config fields for display in WebUI."""
+        summary = {}
+        if name == "feishu":
+            if isinstance(config, dict):
+                summary["app_id"] = config.get("app_id", "")
+                summary["domain"] = config.get("domain", "feishu")
+            else:
+                summary["app_id"] = getattr(config, "app_id", "")
+                summary["domain"] = getattr(config, "domain", "feishu")
+        elif name == "telegram":
+            if isinstance(config, dict):
+                summary["bot_token"] = config.get("bot_token", "")[:10] + "..." if config.get("bot_token") else ""
+            else:
+                token = getattr(config, "bot_token", "")
+                summary["bot_token"] = token[:10] + "..." if token else ""
+        elif name == "slack":
+            if isinstance(config, dict):
+                summary["bot_token"] = config.get("bot_token", "")[:10] + "..." if config.get("bot_token") else ""
+            else:
+                token = getattr(config, "bot_token", "")
+                summary["bot_token"] = token[:10] + "..." if token else ""
+        elif name == "discord":
+            if isinstance(config, dict):
+                summary["bot_token"] = config.get("bot_token", "")[:10] + "..." if config.get("bot_token") else ""
+            else:
+                token = getattr(config, "bot_token", "")
+                summary["bot_token"] = token[:10] + "..." if token else ""
+        return summary
+
+    def get_all_channels_status(self) -> list[dict[str, Any]]:
+        """Return all channel status (including disabled and plugin-registered channels)."""
+        from nanobot.channels.registry import discover_channel_names
+
+        candidate_names = set(discover_channel_names())
+        extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
+        candidate_names.update(extra.keys())
+
+        result: list[dict[str, Any]] = []
+        for name in sorted(candidate_names):
+            channel = self.channels.get(name)
+            if channel is not None:
+                entry = {
+                    "name": name,
+                    "display_name": channel.display_name,
+                    "enabled": True,
+                    "running": channel.is_running,
+                }
+                entry["config"] = self._extract_channel_config_summary(name, channel.config)
+                result.append(entry)
+                continue
+            # Not enabled: only include channels that have a section in config
+            section = getattr(self.config.channels, name, None)
+            if section is None:
+                continue
+            enabled = (
+                bool(section.get("enabled", False))
+                if isinstance(section, dict)
+                else bool(getattr(section, "enabled", False))
+            )
+            entry = {
+                "name": name,
+                "display_name": name.title(),
+                "enabled": enabled,
+                "running": False,
+                "config": self._extract_channel_config_summary(name, section),
+            }
+            result.append(entry)
+        return result
+
+    def get_channel_bot_info(self, name: str) -> dict[str, Any] | None:
+        """Return bot-level info for a running channel (e.g. bot open_id, avatar).
+
+        Delegates to the channel's ``get_bot_info()`` method if available.
+        Returns ``None`` when the channel is not running or doesn't support the call.
+        """
+        channel = self.channels.get(name)
+        if channel is None:
+            return None
+        fn = getattr(channel, "get_bot_info", None)
+        if callable(fn):
+            return fn()
+        return None
+
+    def get_channel_instances(self, name: str) -> list[dict[str, Any]] | None:
+        """Return connected client instances for a channel.
+
+        Delegates to the channel's ``get_instances()`` method if available.
+        Returns ``None`` when the channel doesn't support instance listing.
+        """
+        channel = self.channels.get(name)
+        if channel is None:
+            return None
+        fn = getattr(channel, "get_instances", None)
+        if callable(fn):
+            return fn()
+        return None
 
     @property
     def enabled_channels(self) -> list[str]:

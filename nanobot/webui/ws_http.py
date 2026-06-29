@@ -154,6 +154,7 @@ class GatewayHTTPHandler:
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+        channel_manager: Any | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -184,6 +185,7 @@ class GatewayHTTPHandler:
             error_response=_http_error,
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
+            channel_manager=channel_manager,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
