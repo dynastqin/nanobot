@@ -24,6 +24,7 @@ import type {
   WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
+  WorkspaceFilesPayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
 
@@ -171,6 +172,62 @@ export async function fetchFilePreview(
   query.set("path", path);
   return request<FilePreviewPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export function fileDownloadUrl(
+  key: string,
+  path: string,
+  base: string = "",
+): string {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  return `${base}/api/sessions/${encodeURIComponent(key)}/file-download?${query}`;
+}
+
+export async function downloadFile(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    fileDownloadUrl(key, path, base),
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = typeof res.text === "function" ? (await res.text()).trim() : "";
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const filename = path.split("/").pop() || "file";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function fetchWorkspaceFiles(
+  token: string,
+  key: string,
+  subpath: string = ".",
+  base: string = "",
+): Promise<WorkspaceFilesPayload> {
+  const query = new URLSearchParams();
+  query.set("path", subpath);
+  return request<WorkspaceFilesPayload>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/workspace-files?${query}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

@@ -48,6 +48,7 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
   onForkFromHere?: () => void;
 }
 
@@ -86,6 +87,7 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
+  onOpenLink,
   onForkFromHere,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
@@ -192,6 +194,7 @@ export function MessageBubble({
           streaming={reasoningStreaming}
           hasBodyBelow={!empty}
           onOpenFilePreview={onOpenFilePreview}
+          onOpenLink={onOpenLink}
         />
       ) : null}
       {empty && message.isStreaming && !hasReasoning ? (
@@ -207,6 +210,7 @@ export function MessageBubble({
           <MarkdownText
             streaming={!!message.isStreaming}
             onOpenFilePreview={onOpenFilePreview}
+            onOpenLink={onOpenLink}
           >
             {message.content}
           </MarkdownText>
@@ -594,6 +598,7 @@ interface ReasoningBubbleProps {
   /** When true, skip the slide-in wrapper (used inside ``AgentActivityCluster``). */
   embeddedInCluster?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }
 
 /**
@@ -616,6 +621,7 @@ export function ReasoningBubble({
   hasBodyBelow,
   embeddedInCluster = false,
   onOpenFilePreview,
+  onOpenLink,
 }: ReasoningBubbleProps) {
   const { t } = useTranslation();
   const [userToggled, setUserToggled] = useState(false);
@@ -675,6 +681,7 @@ export function ReasoningBubble({
           <MarkdownText
             streaming={streaming}
             onOpenFilePreview={onOpenFilePreview}
+            onOpenLink={onOpenLink}
             className={cn(
               "text-[12.5px] italic text-muted-foreground/88",
               "prose-p:my-1.5 prose-li:my-0.5",

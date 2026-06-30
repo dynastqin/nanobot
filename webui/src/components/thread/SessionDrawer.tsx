@@ -1,0 +1,856 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import {
+  ChevronRight,
+  Code2,
+  Copy,
+  Download,
+  Eye,
+  FileText,
+  Folder,
+  FolderOpen,
+  GripVertical,
+  Loader2,
+  Maximize2,
+  PanelRight,
+  RefreshCcw,
+  CircleAlert,
+  Check,
+  CalendarClock,
+  X,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
+
+import { Button } from "@/components/ui/button";
+import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
+import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
+import { ApiError, downloadFile, fetchFilePreview, fetchWorkspaceFiles } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import type { FilePreviewPayload, WorkspaceFileNode } from "@/lib/types";
+import {
+  AutomationRow,
+} from "@/components/thread/SessionInfoPopover";
+
+type Tab = "files" | "automations";
+
+interface SessionDrawerProps {
+  sessionKey: string;
+  token: string;
+  open: boolean;
+  desktopWidth?: number;
+  isClosing?: boolean;
+  autoOpenFile?: string;
+  autoOpenFileSeq?: number;
+  onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onClose: () => void;
+  onOpenFileFullscreen: (path: string) => void;
+}
+
+export function SessionDrawer({
+  sessionKey,
+  token,
+  open,
+  desktopWidth = 448,
+  isClosing = false,
+  autoOpenFile,
+  autoOpenFileSeq,
+  onResizeStart,
+  onClose,
+  onOpenFileFullscreen,
+}: SessionDrawerProps) {
+  const { t } = useTranslation("common");
+  const [activeTab, setActiveTab] = useState<Tab>("files");
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  if (!open) return null;
+
+  return (
+    <aside
+      aria-label={t("thread.header.sessionInfo", { defaultValue: "Session details" })}
+      style={{
+        "--file-preview-width": `${desktopWidth}px`,
+        "--file-preview-slot-width": !entered || isClosing ? "0px" : `${desktopWidth}px`,
+      } as CSSProperties}
+      className={cn(
+        "absolute inset-y-0 right-0 z-30 w-[min(100vw,var(--file-preview-slot-width))] overflow-hidden",
+        "transition-[width] duration-300 ease-out will-change-[width]",
+        "md:relative md:z-auto md:w-[var(--file-preview-slot-width)] md:min-w-0 md:shrink-0",
+        isClosing && "pointer-events-none",
+      )}
+      data-file-preview-panel
+    >
+      <div
+        className={cn(
+          "absolute inset-y-0 right-0 flex w-[min(100vw,var(--file-preview-width))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:w-[var(--file-preview-width)] md:pb-0",
+          "border-l border-border/70 bg-background shadow-2xl md:shadow-none",
+          "transition-[opacity,transform] duration-300 ease-out will-change-transform",
+          !entered || isClosing ? "translate-x-full opacity-0" : "translate-x-0 opacity-100",
+          "motion-reduce:translate-x-0",
+        )}
+      >
+        {onResizeStart ? (
+          <button
+            type="button"
+            aria-label="Resize session panel"
+            className={cn(
+              "group absolute inset-y-0 left-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none md:flex",
+              "items-stretch justify-center focus-visible:outline-none",
+            )}
+            onPointerDown={onResizeStart}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
+                "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
+              )}
+            />
+          </button>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Tab bar with toolbar */}
+          <div className="flex shrink-0 items-center border-b border-border/45 px-3">
+            <button
+              type="button"
+              className={cn(
+                "py-2.5 mr-6 text-[13px] font-medium transition-colors border-b-2",
+                activeTab === "files"
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("files")}
+            >
+              {t("thread.sessionInfo.tabs.files")}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "py-2.5 text-[13px] font-medium transition-colors border-b-2",
+                activeTab === "automations"
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("automations")}
+            >
+              {t("thread.sessionInfo.tabs.automations")}
+            </button>
+            <div className="flex-1" />
+            {activeTab === "files" ? (
+              <FilesTabToolbar
+                sessionKey={sessionKey}
+                token={token}
+                onClose={onClose}
+                t={t}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full"
+                onClick={onClose}
+                aria-label={t("filePreview.close", { defaultValue: "Close" })}
+              >
+                <X className="h-4 w-4 stroke-[1.75]" />
+              </Button>
+            )}
+          </div>
+
+          {/* Tab content */}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {activeTab === "files" ? (
+              <FilesTab
+                sessionKey={sessionKey}
+                token={token}
+                autoOpenFile={autoOpenFile}
+                autoOpenFileSeq={autoOpenFileSeq}
+                onOpenFileFullscreen={onOpenFileFullscreen}
+              />
+            ) : (
+              <AutomationsTab
+                sessionKey={sessionKey}
+                token={token}
+                open={open}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Files Tab Toolbar                                                   */
+/* ------------------------------------------------------------------ */
+
+function FilesTabToolbar({
+  sessionKey,
+  token,
+  onClose,
+  t,
+}: {
+  sessionKey: string;
+  token: string;
+  onClose: () => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchWorkspaceFiles(token, sessionKey);
+    } catch {
+      // ignore
+    } finally {
+      setRefreshing(false);
+    }
+    // Trigger reload via a custom event so FilesTab can listen
+    window.dispatchEvent(new CustomEvent("workspace-files-refresh", { detail: sessionKey }));
+  }, [token, sessionKey]);
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 rounded-full"
+        onClick={handleRefresh}
+        disabled={refreshing}
+        aria-label={t("thread.sessionInfo.files.refresh", { defaultValue: "Refresh file tree" })}
+      >
+        <RefreshCcw className={cn("h-4 w-4 stroke-[1.75]", refreshing && "animate-spin")} />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 rounded-full"
+        onClick={onClose}
+        aria-label={t("filePreview.close", { defaultValue: "Close" })}
+      >
+        <X className="h-4 w-4 stroke-[1.75]" />
+      </Button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Files Tab                                                          */
+/* ------------------------------------------------------------------ */
+
+const FILE_TREE_DEFAULT_WIDTH = 220;
+const FILE_TREE_MIN_WIDTH = 120;
+
+// Scroll the currently-selected file tree node into view inside a container.
+// Looks up the node by data attribute after React has committed the tree update
+// (so ancestors are auto-expanded and the selected node is in the DOM).
+function revealSelectedInTree(container: HTMLElement | null) {
+  if (!container) return;
+  const node = container.querySelector<HTMLElement>("[data-file-tree-selected='true']");
+  if (!node) return;
+  node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function FilesTab({
+  sessionKey,
+  token,
+  autoOpenFile,
+  autoOpenFileSeq,
+  onOpenFileFullscreen,
+}: {
+  sessionKey: string;
+  token: string;
+  autoOpenFile?: string;
+  autoOpenFileSeq?: number;
+  onOpenFileFullscreen: (path: string) => void;
+}) {
+  const { t } = useTranslation("common");
+  const [tree, setTree] = useState<WorkspaceFileNode | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const [treeWidth, setTreeWidth] = useState(FILE_TREE_DEFAULT_WIDTH);
+  const treeWidthRef = useRef(FILE_TREE_DEFAULT_WIDTH);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const [previewUnsupported, setPreviewUnsupported] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Latest pending auto-open request. Updated on every click, consumed when the
+  // tree is ready. Lets us distinguish "user just clicked this file" (reveal +
+  // scroll) from "already handled".
+  const pendingAutoOpenRef = useRef<{ path: string; seq: number } | null>(null);
+  const lastAutoOpenSeqRef = useRef<number>(0);
+
+  const loadTree = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const payload = await fetchWorkspaceFiles(token, sessionKey);
+      setTree(payload.tree);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, sessionKey]);
+
+  // Keep ref in sync for resize handler
+  useEffect(() => {
+    treeWidthRef.current = treeWidth;
+  }, [treeWidth]);
+
+  // Tree width resize handler
+  const handleTreeResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const treeEl = handle.previousElementSibling as HTMLElement | null;
+    if (!treeEl) return;
+    const treeRect = treeEl.getBoundingClientRect();
+    const leftEdge = treeRect.left;
+    const originalBodyCursor = document.body.style.cursor;
+    const originalBodyUserSelect = document.body.style.userSelect;
+    let nextWidth = treeWidthRef.current;
+    let frame: number | null = null;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const applyWidth = (clientX: number) => {
+      nextWidth = Math.max(FILE_TREE_MIN_WIDTH, clientX - leftEdge);
+      treeWidthRef.current = nextWidth;
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        setTreeWidth(nextWidth);
+      });
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyWidth(moveEvent.clientX);
+    };
+    const handlePointerUp = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+      setTreeWidth(nextWidth);
+      document.body.style.cursor = originalBodyCursor;
+      document.body.style.userSelect = originalBodyUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    applyWidth(event.clientX);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, []);
+
+  useEffect(() => {
+    loadTree();
+  }, [loadTree]);
+
+  // Listen for refresh events from toolbar
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (detail === sessionKey) loadTree();
+    };
+    window.addEventListener("workspace-files-refresh", handler);
+    return () => window.removeEventListener("workspace-files-refresh", handler);
+  }, [loadTree, sessionKey]);
+
+  // Update the pending auto-open request whenever the click signal changes.
+  // We track the latest seq both as a state and a ref so the effect below can
+  // trigger on seq while still being able to bail out on stale renders.
+  const [pendingSeq, setPendingSeq] = useState<number>(0);
+  useEffect(() => {
+    if (!autoOpenFile || !autoOpenFileSeq) return;
+    if (autoOpenFileSeq <= lastAutoOpenSeqRef.current) return;
+    lastAutoOpenSeqRef.current = autoOpenFileSeq;
+    pendingAutoOpenRef.current = { path: autoOpenFile, seq: autoOpenFileSeq };
+    setPendingSeq(autoOpenFileSeq);
+  }, [autoOpenFile, autoOpenFileSeq]);
+
+  // React to every new auto-open request. If the tree is already loaded,
+  // apply the selection + scroll immediately. If not, the tree-load effect
+  // below will apply it once ready.
+  useEffect(() => {
+    if (!pendingSeq || !tree) return;
+    const pending = pendingAutoOpenRef.current;
+    if (!pending || pending.seq !== pendingSeq) return;
+    setSelectedPath(pending.path);
+    pendingAutoOpenRef.current = null;
+  }, [pendingSeq, tree]);
+
+  // When the tree loads, apply any pending auto-open that arrived while it
+  // was still loading.
+  useEffect(() => {
+    if (!tree) return;
+    const pending = pendingAutoOpenRef.current;
+    if (!pending) return;
+    setSelectedPath(pending.path);
+    pendingAutoOpenRef.current = null;
+  }, [tree]);
+
+  // Reveal the selected file in the scroll container whenever selectedPath
+  // changes (chat click, re-click of the same file, or manual tree click).
+  useEffect(() => {
+    if (!selectedPath) return;
+    // Wait for React to commit the tree update (ancestors auto-expand,
+    // selected node renders) before scrolling it into view.
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        revealSelectedInTree(scrollContainerRef.current);
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedPath]);
+
+  useEffect(() => {
+    if (!selectedPath) return;
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(false);
+    setPreviewUnsupported(false);
+    setPreview(null);
+    setViewMode("preview");
+    (async () => {
+      try {
+        const payload = await fetchFilePreview(token, sessionKey, selectedPath);
+        if (!cancelled) setPreview(payload);
+      } catch (err) {
+        if (!cancelled) {
+          if (err instanceof ApiError && err.status === 415) {
+            setPreviewUnsupported(true);
+          } else {
+            setPreviewError(true);
+          }
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPath, token, sessionKey]);
+
+  const handleCopy = useCallback(async () => {
+    if (!preview?.content) return;
+    try {
+      await navigator.clipboard.writeText(preview.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  }, [preview]);
+
+  const handleDownload = useCallback(async () => {
+    if (!selectedPath) return;
+    if (preview) {
+      // Text file: download the previewed content
+      const blob = new Blob([preview.content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const name = selectedPath.split("/").pop() || "file";
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else if (previewUnsupported) {
+      // Binary file: download raw file from server
+      try {
+        await downloadFile(token, sessionKey, selectedPath);
+      } catch {
+        // download failed
+      }
+    }
+  }, [preview, previewUnsupported, selectedPath, token, sessionKey]);
+
+  const selectFile = useCallback((path: string) => {
+    setSelectedPath(path);
+    if (treeCollapsed) setTreeCollapsed(false);
+  }, [treeCollapsed]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        {t("thread.sessionInfo.files.loading")}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-[13px] text-destructive">
+        <CircleAlert className="h-4 w-4" />
+        <span>{t("thread.sessionInfo.files.error")}</span>
+        <Button variant="ghost" size="sm" onClick={loadTree} className="text-[12px]">
+          {t("thread.sessionInfo.files.retry", { defaultValue: "Retry" })}
+        </Button>
+      </div>
+    );
+  }
+
+  const treeChildren = tree?.children;
+  const isEmpty = !treeChildren || treeChildren.length === 0;
+
+  if (isEmpty) {
+    return (
+      <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+        {t("thread.sessionInfo.files.empty")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Toolbar */}
+      {selectedPath && (
+        <div className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-border/45 bg-muted/30">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setTreeCollapsed(!treeCollapsed)}
+            aria-label={treeCollapsed
+              ? t("thread.sessionInfo.files.expandTree", { defaultValue: "Expand file tree" })
+              : t("thread.sessionInfo.files.collapseTree", { defaultValue: "Collapse file tree" })
+            }
+          >
+            <PanelRight className="h-3.5 w-3.5" />
+          </Button>
+          <div className="flex-1" />
+          {preview && isRenderableFile(preview.language) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setViewMode(viewMode === "preview" ? "source" : "preview")}
+              aria-label={viewMode === "preview" ? t("thread.sessionInfo.files.viewSource") : t("thread.sessionInfo.files.viewPreview")}
+            >
+              {viewMode === "preview" ? (
+                <Code2 className="h-3.5 w-3.5" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleCopy}
+            disabled={!preview || previewLoading}
+            aria-label={t("thread.sessionInfo.files.copyContent")}
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleDownload}
+            disabled={(!preview && !previewUnsupported) || previewLoading}
+            aria-label={t("thread.sessionInfo.files.download")}
+          >
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => {
+              if (selectedPath) onOpenFileFullscreen(selectedPath);
+            }}
+            disabled={!preview || previewLoading}
+            aria-label={t("thread.sessionInfo.files.openFullscreen")}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Body */}
+      <div className="flex-1 min-h-0 flex">
+        {/* Tree */}
+        <div
+          ref={scrollContainerRef}
+          className={cn(
+            "overflow-y-auto border-r border-border/45 transition-[width] duration-200 ease-out",
+            treeCollapsed ? "w-0 border-r-0" : "",
+          )}
+          style={{ width: treeCollapsed ? 0 : treeWidth }}
+        >
+          <div className="py-2" style={{ minWidth: treeWidth }}>
+            {treeChildren.map((child) => (
+              <FileTreeNode
+                key={child.path}
+                node={child}
+                depth={0}
+                selectedPath={selectedPath}
+                onSelect={selectFile}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Tree resize handle */}
+        {!treeCollapsed && (
+          <button
+            type="button"
+            aria-label={t("thread.sessionInfo.files.resizeTree", { defaultValue: "Resize file tree" })}
+            className={cn(
+              "group relative shrink-0 w-3 -ml-px cursor-col-resize touch-none",
+              "flex items-center justify-center focus-visible:outline-none",
+            )}
+            onPointerDown={handleTreeResizeStart}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
+                "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
+              )}
+            />
+            <GripVertical
+              aria-hidden
+              className="absolute h-4 w-4 text-muted-foreground/30 opacity-0 transition-opacity group-hover:opacity-100"
+            />
+          </button>
+        )}
+
+        {/* Preview */}
+        {selectedPath && (
+          <div className="flex-1 min-w-0 overflow-y-auto bg-muted/20">
+            {previewLoading ? (
+              <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                {t("thread.sessionInfo.files.loading")}
+              </div>
+            ) : previewUnsupported ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-[13px] text-muted-foreground px-4 text-center">
+                <CircleAlert className="h-5 w-5 text-amber-500/70" />
+                <div>
+                  <p className="font-medium text-foreground/80">
+                    {t("thread.sessionInfo.files.previewUnsupported", { defaultValue: "Preview not supported for this file type" })}
+                  </p>
+                  <p className="mt-1">
+                    {t("thread.sessionInfo.files.previewUnsupportedHint", { defaultValue: "Please download to view the content." })}
+                  </p>
+                </div>
+              </div>
+            ) : previewError ? (
+              <div className="flex flex-col items-center justify-center h-full gap-2 text-[13px] text-destructive">
+                <CircleAlert className="h-4 w-4" />
+                <span>{t("thread.sessionInfo.files.error")}</span>
+              </div>
+            ) : preview ? (
+              <div className="flex flex-col min-h-0 h-full p-3">
+                <FilePreviewContent
+                  language={preview.language}
+                  content={preview.content}
+                  viewMode={viewMode}
+                  showLineNumbers
+                  className="flex-1 min-h-0"
+                />
+                {preview.truncated && (
+                  <div className="mt-2 text-[11px] text-muted-foreground shrink-0">
+                    {t("filePreview.truncated")}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* No file selected placeholder */}
+        {!selectedPath && (
+          <div className="flex-1 min-w-0 overflow-y-auto bg-muted/20 flex justify-center pt-32">
+            <span className="text-[13px] text-muted-foreground">
+              {t("thread.sessionInfo.files.selectFile")}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* File Tree Node                                                     */
+/* ------------------------------------------------------------------ */
+
+function isPathUnderDir(dirPath: string, targetPath: string | null): boolean {
+  if (!targetPath) return false;
+  const normalizedDir = dirPath.endsWith("/") ? dirPath : `${dirPath}/`;
+  return targetPath.startsWith(normalizedDir);
+}
+
+function FileTreeNode({
+  node,
+  depth,
+  selectedPath,
+  onSelect,
+}: {
+  node: WorkspaceFileNode;
+  depth: number;
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const isDir = node.type === "directory";
+  const hasChildren = isDir && node.children && node.children.length > 0;
+  const autoExpand = isDir && hasChildren && isPathUnderDir(node.path, selectedPath);
+  const [expanded, setExpanded] = useState(autoExpand);
+
+  // Auto-expand when selectedPath changes to a descendant. Depend on
+  // selectedPath directly (not the derived autoExpand) so this fires on every
+  // selection change — e.g. when a file is clicked in chat and the parent
+  // dir was previously collapsed.
+  useEffect(() => {
+    if (isDir && hasChildren && isPathUnderDir(node.path, selectedPath)) {
+      setExpanded(true);
+    }
+  }, [selectedPath, isDir, hasChildren, node.path]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        data-file-tree-selected={selectedPath === node.path ? "true" : undefined}
+        className={cn(
+          "flex items-center w-full gap-1.5 px-3 py-1 text-[12.5px] text-left transition-colors hover:bg-accent/40",
+          selectedPath === node.path && "bg-accent/60 text-foreground",
+          !selectedPath && "text-foreground/85",
+          selectedPath && selectedPath !== node.path && "text-muted-foreground",
+        )}
+        style={{ paddingLeft: `${12 + depth * 16}px` }}
+        onClick={() => {
+          if (isDir && hasChildren) {
+            setExpanded(!expanded);
+          } else if (!isDir) {
+            onSelect(node.path);
+          }
+        }}
+      >
+        {isDir && hasChildren ? (
+          <ChevronRight className={cn(
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform",
+            expanded && "rotate-90",
+          )} />
+        ) : (
+          <span className="w-3.5 shrink-0" />
+        )}
+        {isDir ? (
+          expanded && hasChildren ? (
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500/80" />
+          ) : (
+            <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500/80" />
+          )
+        ) : (
+          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+        )}
+        <span className="truncate">{node.name}</span>
+        {!isDir && node.size !== undefined && (
+          <span className="ml-auto shrink-0 text-[10.5px] text-muted-foreground/50">
+            {formatSize(node.size)}
+          </span>
+        )}
+      </button>
+      {isDir && hasChildren && expanded && (
+        <div>
+          {node.children!.map((child) => (
+            <FileTreeNode
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              selectedPath={selectedPath}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Automations Tab                                                    */
+/* ------------------------------------------------------------------ */
+
+function AutomationsTab({
+  sessionKey,
+  token,
+  open,
+}: {
+  sessionKey: string;
+  token: string;
+  open: boolean;
+}) {
+  const { t } = useTranslation("common");
+  const { jobs, loading, loadFailed, now } = useSessionAutomationJobs(open, token, sessionKey);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+          <span className="truncate text-[13px] font-medium text-foreground">
+            {t("thread.sessionInfo.automations")}
+          </span>
+        </div>
+        <span className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px] text-muted-foreground">
+          {t("thread.sessionInfo.count", { count: jobs.length })}
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 pb-4">
+        {loading ? (
+          <div className="flex items-center gap-2 rounded-[16px] bg-muted/45 px-3 py-3 text-[12.5px] text-muted-foreground">
+            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
+            {t("thread.sessionInfo.loading")}
+          </div>
+        ) : loadFailed ? (
+          <div className="flex items-center gap-2 rounded-[16px] bg-destructive/10 px-3 py-3 text-[12.5px] text-destructive">
+            <CircleAlert className="h-3.5 w-3.5" />
+            {t("thread.sessionInfo.loadFailed")}
+          </div>
+        ) : jobs.length ? (
+          <div className="space-y-1.5">
+            {jobs.map((job) => (
+              <AutomationRow key={job.id} job={job} now={now} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-[16px] bg-muted/35 px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+            {t("thread.sessionInfo.empty")}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

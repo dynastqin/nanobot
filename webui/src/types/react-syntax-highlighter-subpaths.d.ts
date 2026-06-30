@@ -1,4 +1,4 @@
-declare module "react-syntax-highlighter/dist/esm/prism-async-light" {
+declare module "react-syntax-highlighter/dist/esm/prism" {
   import * as React from "react";
   import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 

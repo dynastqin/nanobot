@@ -2,13 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import {
+  FilePreviewPanel,
+} from "@/components/FilePreviewPanel";
+import { FileFullscreenPreview } from "@/components/FileFullscreenPreview";
+import { LinkPreviewDrawer } from "@/components/LinkPreviewDrawer";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
-import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
+import { SessionDrawer } from "@/components/thread/SessionDrawer";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import {
@@ -27,6 +37,7 @@ import {
   installedMcpPresetsFromPayload,
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
+import { Package } from "lucide-react";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
@@ -38,7 +49,14 @@ import type {
 } from "@/lib/types";
 import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
+import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
+
+type RightPanel =
+  | { kind: "closed" }
+  | { kind: "session"; tab: "files" | "automations"; autoOpenFile?: string; autoOpenFileSeq?: number }
+  | { kind: "preview"; path: string; returnToSession?: boolean }
+  | { kind: "link"; url: string };
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
@@ -102,20 +120,19 @@ function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boo
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
-const FILE_PREVIEW_DEFAULT_WIDTH = 544;
+const FILE_PREVIEW_DEFAULT_WIDTH = 550; // 右侧抽屉，默认宽度
 const FILE_PREVIEW_MIN_WIDTH = 360;
-const FILE_PREVIEW_MAX_WIDTH = 860;
-const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
 
 function clampFilePreviewWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, FILE_PREVIEW_MIN_WIDTH), maxWidth);
 }
 
-function maxFilePreviewWidth(containerWidth: number): number {
+function maxFilePreviewWidth(): number {
+  const screenWidth = typeof window !== "undefined" ? window.innerWidth : 1200;
   return Math.max(
     FILE_PREVIEW_MIN_WIDTH,
-    Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+    screenWidth
   );
 }
 
@@ -329,12 +346,13 @@ export function ThreadShell({
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const [scrollToLatestUserPromptSignal, setScrollToLatestUserPromptSignal] = useState(0);
-  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
-  const [filePreviewClosing, setFilePreviewClosing] = useState(false);
-  const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [rightPanel, setRightPanel] = useState<RightPanel>({ kind: "closed" });
+  const [panelWidth, setPanelWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [panelClosing, setPanelClosing] = useState(false);
+  const [fullscreenFilePath, setFullscreenFilePath] = useState<string | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
-  const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
-  const filePreviewCloseTimerRef = useRef<number | null>(null);
+  const panelWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
+  const panelCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
@@ -372,22 +390,22 @@ export function ThreadShell({
   }, [chatId, historyKey]);
 
   useEffect(() => {
-    filePreviewWidthRef.current = filePreviewWidth;
-  }, [filePreviewWidth]);
+    panelWidthRef.current = panelWidth;
+  }, [panelWidth]);
 
   useEffect(() => {
-    if (filePreviewCloseTimerRef.current !== null) {
-      window.clearTimeout(filePreviewCloseTimerRef.current);
-      filePreviewCloseTimerRef.current = null;
+    if (panelCloseTimerRef.current !== null) {
+      window.clearTimeout(panelCloseTimerRef.current);
+      panelCloseTimerRef.current = null;
     }
-    setFilePreviewClosing(false);
-    setFilePreviewPath(null);
+    setPanelClosing(false);
+    setRightPanel({ kind: "closed" });
   }, [historyKey]);
 
   useEffect(() => {
     return () => {
-      if (filePreviewCloseTimerRef.current !== null) {
-        window.clearTimeout(filePreviewCloseTimerRef.current);
+      if (panelCloseTimerRef.current !== null) {
+        window.clearTimeout(panelCloseTimerRef.current);
       }
     };
   }, []);
@@ -599,35 +617,80 @@ export function ThreadShell({
   );
 
   const handleOpenFilePreview = useCallback((path: string) => {
-    if (filePreviewCloseTimerRef.current !== null) {
-      window.clearTimeout(filePreviewCloseTimerRef.current);
-      filePreviewCloseTimerRef.current = null;
+    if (panelCloseTimerRef.current !== null) {
+      window.clearTimeout(panelCloseTimerRef.current);
+      panelCloseTimerRef.current = null;
     }
-    setFilePreviewClosing(false);
-    setFilePreviewPath(path);
+    setPanelClosing(false);
+
+    // Normalize relative paths (e.g. "outputs/foo.txt" from agent messages) to
+    // absolute paths against the workspace root. The workspace file tree uses
+    // absolute paths, so a relative path would never match a tree node and
+    // would bypass the "in workspace" detection below.
+    const wsRoot = workspaceScope?.project_path;
+    const isAbsolutePath = path.startsWith("/");
+    const normalizedPath =
+      !isAbsolutePath && wsRoot ? `${wsRoot.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}` : path;
+
+    // Check if the path is in the workspace. Use separator-aware prefix check
+    // to avoid false positives like "/ws-other" matching "/ws".
+    let isInWorkspace = false;
+    if (wsRoot) {
+      const rootPrefix = wsRoot.endsWith("/") ? wsRoot : `${wsRoot}/`;
+      isInWorkspace = normalizedPath === wsRoot || normalizedPath.startsWith(rootPrefix);
+    }
+
+    if (isInWorkspace) {
+      // Open session panel with auto-navigate to file. Increment a sequence counter
+      // so FilesTab can treat every click as a fresh reveal request (even re-clicks).
+      setRightPanel((prev) => ({
+        kind: "session",
+        tab: "files",
+        autoOpenFile: normalizedPath,
+        autoOpenFileSeq: ((prev.kind === "session" ? prev.autoOpenFileSeq : 0) ?? 0) + 1,
+      }));
+    } else {
+      // Open standalone preview
+      setRightPanel({ kind: "preview", path: normalizedPath });
+    }
+  }, [workspaceScope]);
+
+  const handleCloseRightPanel = useCallback(() => {
+    if (panelClosing) return;
+    if (rightPanel.kind === "preview" && rightPanel.returnToSession) {
+      // Return to session panel
+      setRightPanel({ kind: "session", tab: "files" });
+    } else {
+      // Animate close
+      setPanelClosing(true);
+      panelCloseTimerRef.current = window.setTimeout(() => {
+        panelCloseTimerRef.current = null;
+        setRightPanel({ kind: "closed" });
+        setPanelClosing(false);
+      }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
+    }
+  }, [panelClosing, rightPanel]);
+
+  const handleOpenLink = useCallback((url: string) => {
+    if (panelCloseTimerRef.current !== null) {
+      window.clearTimeout(panelCloseTimerRef.current);
+      panelCloseTimerRef.current = null;
+    }
+    setPanelClosing(false);
+    setRightPanel({ kind: "link", url });
   }, []);
 
-  const handleCloseFilePreview = useCallback(() => {
-    if (!filePreviewPath || filePreviewClosing) return;
-    setFilePreviewClosing(true);
-    filePreviewCloseTimerRef.current = window.setTimeout(() => {
-      filePreviewCloseTimerRef.current = null;
-      setFilePreviewPath(null);
-      setFilePreviewClosing(false);
-    }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
-  }, [filePreviewClosing, filePreviewPath]);
-
-  const handleFilePreviewResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handlePanelResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const panel = event.currentTarget.closest<HTMLElement>("[data-file-preview-panel]");
     const shellRect = shellRef.current?.getBoundingClientRect();
     const rightEdge = shellRect?.right ?? window.innerWidth;
-    const maxWidth = maxFilePreviewWidth(shellRect?.width ?? window.innerWidth);
+    const maxWidth = maxFilePreviewWidth();
     const originalBodyCursor = document.body.style.cursor;
     const originalBodyUserSelect = document.body.style.userSelect;
     const originalPanelTransition = panel?.style.transition ?? "";
-    let nextWidth = filePreviewWidthRef.current;
+    let nextWidth = panelWidthRef.current;
     let frame: number | null = null;
 
     document.body.style.cursor = "col-resize";
@@ -636,7 +699,7 @@ export function ThreadShell({
 
     const applyWidth = (clientX: number) => {
       nextWidth = clampFilePreviewWidth(rightEdge - clientX, maxWidth);
-      filePreviewWidthRef.current = nextWidth;
+      panelWidthRef.current = nextWidth;
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
@@ -656,7 +719,7 @@ export function ThreadShell({
       panel?.style.setProperty("--file-preview-width", `${nextWidth}px`);
       panel?.style.setProperty("--file-preview-slot-width", `${nextWidth}px`);
       if (panel) panel.style.transition = originalPanelTransition;
-      setFilePreviewWidth(nextWidth);
+      setPanelWidth(nextWidth);
       document.body.style.cursor = originalBodyCursor;
       document.body.style.userSelect = originalBodyUserSelect;
       window.removeEventListener("pointermove", handlePointerMove);
@@ -671,20 +734,19 @@ export function ThreadShell({
   }, []);
 
   useEffect(() => {
-    if (!filePreviewPath) return;
+    if (rightPanel.kind !== "preview" && rightPanel.kind !== "session") return;
     const clampToShell = () => {
-      const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-      const maxWidth = maxFilePreviewWidth(shellWidth);
-      const nextWidth = clampFilePreviewWidth(filePreviewWidthRef.current, maxWidth);
-      filePreviewWidthRef.current = nextWidth;
-      setFilePreviewWidth(nextWidth);
+      const maxWidth = maxFilePreviewWidth();
+      const nextWidth = clampFilePreviewWidth(panelWidthRef.current, maxWidth);
+      panelWidthRef.current = nextWidth;
+      setPanelWidth(nextWidth);
     };
     clampToShell();
     window.addEventListener("resize", clampToShell);
     return () => {
       window.removeEventListener("resize", clampToShell);
     };
-  }, [filePreviewPath]);
+  }, [rightPanel]);
 
   const handleForkFromMessage = useCallback(
     async (beforeUserIndex: number) => {
@@ -781,9 +843,42 @@ export function ThreadShell({
       </h1>
     </div>
   );
-  const sessionInfoAction = historyKey ? (
-    <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
-  ) : undefined;
+  const sessionInfoLabel = t("thread.header.sessionInfo");
+  const sessionInfoAction = (
+    <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={sessionInfoLabel}
+            disabled={!historyKey}
+            className={cn(
+              "host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 inline-flex items-center justify-center",
+              "hover:bg-accent/40 hover:text-foreground",
+              "disabled:opacity-40 disabled:pointer-events-none",
+              rightPanel.kind === "session" && "bg-accent/40 text-foreground",
+            )}
+            onClick={() => {
+              if (!historyKey) return;
+              if (rightPanel.kind === "session") {
+                handleCloseRightPanel();
+              } else {
+                if (panelCloseTimerRef.current !== null) {
+                  window.clearTimeout(panelCloseTimerRef.current);
+                  panelCloseTimerRef.current = null;
+                }
+                setPanelClosing(false);
+                setRightPanel({ kind: "session", tab: "files" });
+              }
+            }}
+          >
+            <Package className="h-4 w-4 stroke-[1.75]" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{sessionInfoLabel}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
       messages={displayMessages}
@@ -826,18 +921,53 @@ export function ThreadShell({
           userMessageOffset={userMessageOffset}
           onLoadOlder={loadOlder}
           onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+          onOpenLink={historyKey ? handleOpenLink : undefined}
           onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
         />
       </div>
-      {filePreviewPath && historyKey ? (
+      {rightPanel.kind === "session" && historyKey ? (
+        <SessionDrawer
+          sessionKey={historyKey}
+          token={token}
+          open
+          desktopWidth={panelWidth}
+          isClosing={panelClosing}
+          autoOpenFile={rightPanel.autoOpenFile}
+          autoOpenFileSeq={rightPanel.autoOpenFileSeq}
+          onResizeStart={handlePanelResizeStart}
+          onClose={handleCloseRightPanel}
+          onOpenFileFullscreen={(path) => setFullscreenFilePath(path)}
+        />
+      ) : rightPanel.kind === "link" && historyKey ? (
+        <LinkPreviewDrawer
+          url={rightPanel.url}
+          desktopWidth={panelWidth}
+          isClosing={panelClosing}
+          onResizeStart={handlePanelResizeStart}
+          onClose={handleCloseRightPanel}
+        />
+      ) : rightPanel.kind === "preview" && historyKey ? (
         <FilePreviewPanel
           sessionKey={historyKey}
-          path={filePreviewPath}
+          path={rightPanel.path}
           token={token}
-          desktopWidth={filePreviewWidth}
-          isClosing={filePreviewClosing}
-          onResizeStart={handleFilePreviewResizeStart}
-          onClose={handleCloseFilePreview}
+          desktopWidth={panelWidth}
+          isClosing={panelClosing}
+          onResizeStart={handlePanelResizeStart}
+          onClose={handleCloseRightPanel}
+          onRestore={
+            rightPanel.returnToSession
+              ? () => setRightPanel({ kind: "session", tab: "files" })
+              : undefined
+          }
+        />
+      ) : null}
+      {fullscreenFilePath && historyKey ? (
+        <FileFullscreenPreview
+          sessionKey={historyKey}
+          token={token}
+          path={fullscreenFilePath}
+          onClose={() => setFullscreenFilePath(null)}
         />
       ) : null}
     </section>

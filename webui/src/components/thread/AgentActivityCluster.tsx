@@ -174,6 +174,7 @@ interface AgentActivityClusterProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }
 
 /**
@@ -188,6 +189,7 @@ export function AgentActivityCluster({
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
+  onOpenLink,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEdits = useMemo(
@@ -513,6 +515,7 @@ export function AgentActivityCluster({
                       text={m.reasoning ?? ""}
                       streaming={isTurnStreaming && !!m.reasoningStreaming}
                       onOpenFilePreview={onOpenFilePreview}
+                      onOpenLink={onOpenLink}
                     />
                   );
                 }

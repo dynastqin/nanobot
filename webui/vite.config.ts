@@ -21,9 +21,6 @@ export default defineConfig(({ mode }) => {
       // there for CommonJS interop such as style-to-js.
       exclude: [
         "@radix-ui/react-dialog",
-        "react-syntax-highlighter/dist/esm/prism-async-light",
-        "react-syntax-highlighter/dist/esm/styles/prism/one-dark",
-        "react-syntax-highlighter/dist/esm/styles/prism/one-light",
       ],
     },
     build: {
@@ -33,12 +30,14 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes("node_modules/refractor/lang/")) {
-              return;
+            if (id.includes("node_modules/refractor/")) {
+              return "syntax-highlight";
             }
             if (
               id.includes("node_modules/react-syntax-highlighter")
-              || id.includes("node_modules/refractor/core")
+              || id.includes("node_modules/prismjs/")
+              || id.includes("node_modules/hastscript")
+              || id.includes("node_modules/parse-entities")
             ) {
               return "syntax-highlight";
             }

@@ -45,6 +45,7 @@ interface ThreadViewportProps {
   userMessageOffset?: number;
   onLoadOlder?: () => Promise<void> | void;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
@@ -116,6 +117,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   userMessageOffset = 0,
   onLoadOlder,
   onOpenFilePreview,
+  onOpenLink,
   onForkFromMessage,
 }, ref) {
   const { t } = useTranslation();
@@ -513,6 +515,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   mcpPresets={mcpPresets}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   onOpenFilePreview={onOpenFilePreview}
+                  onOpenLink={onOpenLink}
                   onForkFromMessage={onForkFromMessage}
                 />
               </div>

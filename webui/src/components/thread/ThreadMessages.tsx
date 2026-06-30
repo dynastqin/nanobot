@@ -14,6 +14,7 @@ interface ThreadMessagesProps {
   mcpPresets?: McpPresetInfo[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
@@ -68,6 +69,7 @@ export function ThreadMessages({
   mcpPresets = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
+  onOpenLink,
   onForkFromMessage,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
@@ -120,6 +122,7 @@ export function ThreadMessages({
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   onOpenFilePreview={onOpenFilePreview}
+                  onOpenLink={onOpenLink}
                 />
               ) : (
                 <MessageBubble
@@ -132,6 +135,7 @@ export function ThreadMessages({
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   onOpenFilePreview={onOpenFilePreview}
+                  onOpenLink={onOpenLink}
                   onForkFromHere={
                     onForkFromMessage && forkIndex !== undefined
                       ? () => onForkFromMessage(forkIndex)

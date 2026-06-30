@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   CalendarClock,
   CircleAlert,
-  ListTodo,
+  Package,
   RefreshCcw,
 } from "lucide-react";
 import type { TFunction } from "i18next";
@@ -20,7 +20,7 @@ import { fmtDateTime } from "@/lib/format";
 import type { SessionAutomationJob } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
+export const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
   [60, "second"],
   [60, "minute"],
   [24, "hour"],
@@ -74,7 +74,7 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
             "hover:bg-accent/40 hover:text-foreground",
           )}
         >
-          <ListTodo className="h-4 w-4 stroke-[1.75]" />
+          <Package className="h-4 w-4 stroke-[1.75]" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -113,7 +113,7 @@ export function SessionInfoPopover({ sessionKey, token, title }: SessionInfoPopo
   );
 }
 
-function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number }) {
+export function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number }) {
   const { t } = useTranslation("common");
   const schedule = formatSchedule(job, t);
   const nextRun = formatNextRun(job, t, now);
@@ -150,7 +150,7 @@ function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number })
   );
 }
 
-function formatSchedule(job: SessionAutomationJob, t: TFunction) {
+export function formatSchedule(job: SessionAutomationJob, t: TFunction) {
   const locale = currentLocale();
   if (job.schedule.kind === "at" && job.schedule.at_ms) {
     return t("thread.sessionInfo.schedule.at", { time: fmtDateTime(job.schedule.at_ms, locale) });
@@ -171,7 +171,7 @@ function formatSchedule(job: SessionAutomationJob, t: TFunction) {
   return t("thread.sessionInfo.schedule.unknown");
 }
 
-function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
+export function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
   const locale = currentLocale();
   if (!job.enabled) {
     return { label: t("thread.sessionInfo.next.disabled"), title: "" };
@@ -189,7 +189,7 @@ function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
   };
 }
 
-function relativeTimeFrom(value: number, now: number, locale: string): string {
+export function relativeTimeFrom(value: number, now: number, locale: string): string {
   let delta = (value - now) / 1000;
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   for (const [step, unit] of RELATIVE_THRESHOLDS) {
@@ -201,7 +201,7 @@ function relativeTimeFrom(value: number, now: number, locale: string): string {
   return formatter.format(Math.round(delta), "year");
 }
 
-function formatDuration(ms: number, locale: string): string {
+export function formatDuration(ms: number, locale: string): string {
   const units: Array<[Intl.NumberFormatOptions["unit"], number]> = [
     ["day", 86_400_000],
     ["hour", 3_600_000],

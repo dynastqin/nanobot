@@ -17,6 +17,7 @@ from nanobot.utils.helpers import (
     current_time_str,
     detect_image_mime,
     load_bundled_template,
+    outputs_dir_for_session,
     truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
@@ -75,7 +76,7 @@ class ContextBuilder:
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
-        parts = [self._get_identity(channel=channel, workspace=root)]
+        parts = [self._get_identity(channel=channel, workspace=root, session_key=session_key)]
 
         bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
@@ -116,7 +117,12 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
+    def _get_identity(
+        self,
+        channel: str | None = None,
+        workspace: Path | None = None,
+        session_key: str | None = None,
+    ) -> str:
         """Get the core identity section."""
         root = workspace or self.workspace
         workspace_path = str(root.expanduser().resolve())
@@ -129,6 +135,7 @@ class ContextBuilder:
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
             channel=channel or "",
+            outputs_dir=outputs_dir_for_session(session_key),
         )
 
     @staticmethod

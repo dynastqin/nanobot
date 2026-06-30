@@ -791,7 +791,7 @@
       "newChat": "Start a new chat",
       "toggleTheme": "Toggle theme from header",
       "settings": "Open settings",
-      "sessionInfo": "Session details"
+      "sessionInfo": "Artifact"
     },
     "sessionInfo": {
       "title": "Session",
@@ -814,6 +814,28 @@
         "pending": "Runs shortly",
         "disabled": "Paused",
         "none": "No next run"
+      },
+      "tabs": {
+        "files": "Files",
+        "automations": "Automations"
+      },
+      "files": {
+        "loading": "Loading workspace files...",
+        "error": "Could not load workspace files.",
+        "empty": "No files found",
+        "selectFile": "Select a file to preview",
+        "expandTree": "Expand file tree",
+        "collapseTree": "Collapse file tree",
+        "resizeTree": "Resize file tree",
+        "refresh": "Refresh file tree",
+        "previewUnsupported": "Preview not supported for this file type",
+        "previewUnsupportedHint": "Please download to view the content.",
+        "copyContent": "Copy content",
+        "copied": "Copied",
+        "download": "Download",
+        "openFullscreen": "Open in fullscreen",
+        "viewSource": "View source",
+        "viewPreview": "View preview"
       }
     },
     "composer": {
@@ -1040,7 +1062,19 @@
     "failed": "Could not preview this file.",
     "routeMissing": "File preview needs the latest gateway. Restart nanobot gateway and try again.",
     "resize": "Resize file preview",
-    "truncated": "Preview is truncated because this file is large."
+    "truncated": "Preview is truncated because this file is large.",
+    "viewSource": "View source",
+    "viewPreview": "View preview"
+  },
+  "linkPreview": {
+    "aria": "Link preview",
+    "close": "Close link preview",
+    "loading": "Loading page...",
+    "failed": "Could not load this page.",
+    "copyUrl": "Copy URL",
+    "copied": "Copied",
+    "openExternal": "Open in new window",
+    "retry": "Retry"
   },
   "code": {
     "fallbackLanguage": "code",

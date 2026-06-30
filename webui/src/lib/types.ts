@@ -931,6 +931,20 @@ export interface FilePreviewPayload {
   truncated: boolean;
 }
 
+export interface WorkspaceFileNode {
+  name: string;
+  type: "file" | "directory";
+  path: string;
+  size?: number;
+  children?: WorkspaceFileNode[];
+}
+
+export interface WorkspaceFilesPayload {
+  path: string;
+  display_path: string;
+  tree: WorkspaceFileNode;
+}
+
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }

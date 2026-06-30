@@ -276,6 +276,18 @@ def safe_filename(name: str) -> str:
     return _UNSAFE_CHARS.sub("_", name).strip()
 
 
+def outputs_dir_for_session(session_key: str | None) -> str:
+    """Return the per-session outputs directory name (relative to workspace root).
+
+    Sanitizes the session_key so characters like ':' (unsafe in directory names
+    on Windows / shown as '/' in macOS Finder) are replaced with '_'.
+    Falls back to 'outputs_default' when session_key is missing.
+    """
+    if not session_key:
+        return "outputs_default"
+    return f"outputs_{safe_filename(session_key)}"
+
+
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     """Build an image placeholder string."""
     return f"[image: {path}]" if path else empty

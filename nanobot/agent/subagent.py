@@ -226,13 +226,13 @@ class SubagentManager:
                 cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             tools = self._build_tools(workspace=root, tools_config=cfg)
-            system_prompt = self._build_subagent_prompt(workspace=root)
+            sess_key = origin.get("session_key")
+            system_prompt = self._build_subagent_prompt(workspace=root, session_key=sess_key)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
 
-            sess_key = origin.get("session_key")
             llm_timeout = (
                 self._llm_wall_timeout_for_session(sess_key)
                 if self._llm_wall_timeout_for_session
@@ -353,10 +353,15 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
+    def _build_subagent_prompt(
+        self,
+        workspace: Path | None = None,
+        session_key: str | None = None,
+    ) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
+        from nanobot.utils.helpers import outputs_dir_for_session
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
         root = workspace or self.workspace
@@ -369,6 +374,7 @@ class SubagentManager:
             time_ctx=time_ctx,
             workspace=str(root),
             skills_summary=skills_summary or "",
+            outputs_dir=outputs_dir_for_session(session_key),
         )
 
     async def cancel_by_session(self, session_key: str) -> int:

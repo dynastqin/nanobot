@@ -19,6 +19,7 @@ interface MarkdownTextProps {
   className?: string;
   streaming?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }
 
 const loadMarkdownRenderer = () => import("@/components/MarkdownTextRenderer");
@@ -29,17 +30,20 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   className,
   highlightCode,
   onOpenFilePreview,
+  onOpenLink,
 }: {
   source: string;
   className?: string;
   highlightCode: boolean;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }) {
   return (
     <LazyMarkdownRenderer
       className={className}
       highlightCode={highlightCode}
       onOpenFilePreview={onOpenFilePreview}
+      onOpenLink={onOpenLink}
     >
       {source}
     </LazyMarkdownRenderer>
@@ -80,6 +84,7 @@ export function MarkdownText({
   className,
   streaming = false,
   onOpenFilePreview,
+  onOpenLink,
 }: MarkdownTextProps) {
   const renderedSource = useStreamingMarkdownSource(children, streaming);
   const highlightCode = streaming
@@ -109,6 +114,7 @@ export function MarkdownText({
           className={className}
           highlightCode={highlightCode}
           onOpenFilePreview={onOpenFilePreview}
+          onOpenLink={onOpenLink}
         />
       </Suspense>
     </MarkdownRendererBoundary>

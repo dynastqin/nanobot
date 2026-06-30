@@ -11,10 +11,12 @@ export function ReasoningRow({
   text,
   streaming,
   onOpenFilePreview,
+  onOpenLink,
 }: {
   text: string;
   streaming: boolean;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const { t } = useTranslation();
   useEffect(() => {
@@ -33,6 +35,7 @@ export function ReasoningRow({
         <MarkdownText
           streaming={streaming}
           onOpenFilePreview={onOpenFilePreview}
+          onOpenLink={onOpenLink}
           className={cn(
             "min-w-0 text-[12.5px] italic text-muted-foreground/78",
             "prose-p:my-1 prose-li:my-0.5",

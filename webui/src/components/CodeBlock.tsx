@@ -47,7 +47,7 @@ const LazyHighlightedCode = lazy(async () => {
     { default: oneDark },
     { default: oneLight },
   ] = await Promise.all([
-    import("react-syntax-highlighter/dist/esm/prism-async-light"),
+    import("react-syntax-highlighter/dist/esm/prism"),
     import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
     import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
   ]);

@@ -80,3 +80,8 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelin
 - Tool registry: `nanobot/agent/tools/registry.py`
 - WebUI dev proxy config: `webui/vite.config.ts`
 - Tests mirror the `nanobot/` package structure.
+
+## i18n
+
+- When adding new translation keys, only modify `en/common.json` and `zh-CN/common.json`.
+- Other locale files are maintained separately.

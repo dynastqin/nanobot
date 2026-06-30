@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { AlertCircle, ChevronRight, FileText, Loader2, X } from "lucide-react";
+import { AlertCircle, ChevronRight, Code2, Eye, FileText, Loader2, Minimize2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { CodeBlock } from "@/components/CodeBlock";
+import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
 import { splitFilePath } from "@/components/FileReferenceChip";
 import { ApiError, fetchFilePreview } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
@@ -17,6 +17,7 @@ interface FilePreviewPanelProps {
   isClosing?: boolean;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onClose: () => void;
+  onRestore?: () => void;
 }
 
 type PreviewState =
@@ -37,11 +38,13 @@ export function FilePreviewPanel({
   isClosing = false,
   onResizeStart,
   onClose,
+  onRestore,
 }: FilePreviewPanelProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [entered, setEntered] = useState(false);
   const [supportsHoverClose, setSupportsHoverClose] = useState(supportsHoverCloseControl);
+  const [viewMode, setViewMode] = useState<ViewMode>("preview");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -64,6 +67,7 @@ export function FilePreviewPanel({
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
+    setViewMode("preview");
     fetchFilePreview(token, sessionKey, path)
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
@@ -146,44 +150,56 @@ export function FilePreviewPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
             {supportsHoverClose ? (
-              <div
-                className={cn(
-                  "group inline-flex max-w-full min-w-0 items-center gap-2 rounded-[12px]",
-                  "bg-muted/70 px-2.5 py-1.5 text-sm font-medium",
-                )}
-                title={name || displayPath}
-              >
-                <button
-                  type="button"
-                  onClick={onClose}
+              <>
+                <div
                   className={cn(
-                    "relative inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full",
-                    "text-muted-foreground/75 transition-[background-color,color,opacity] duration-150 ease-out",
-                    "group-hover:bg-foreground group-hover:text-background group-hover:opacity-100",
-                    "group-focus-within:bg-foreground group-focus-within:text-background",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "group inline-flex max-w-full min-w-0 items-center gap-2 rounded-[12px]",
+                    "bg-muted/70 px-2.5 py-1.5 text-sm font-medium",
                   )}
-                  aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
+                  title={name || displayPath}
                 >
-                  <FileText
+                  <button
+                    type="button"
+                    onClick={onClose}
                     className={cn(
-                      "absolute h-4 w-4 transition-all duration-150 ease-out",
-                      "opacity-100 group-hover:scale-75 group-hover:opacity-0",
-                      "group-focus-within:scale-75 group-focus-within:opacity-0",
+                      "relative inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full",
+                      "text-muted-foreground/75 transition-[background-color,color,opacity] duration-150 ease-out",
+                      "group-hover:bg-foreground group-hover:text-background group-hover:opacity-100",
+                      "group-focus-within:bg-foreground group-focus-within:text-background",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     )}
-                    aria-hidden
-                  />
-                  <X
-                    className={cn(
-                      "absolute h-3.5 w-3.5 scale-75 opacity-0 transition-all duration-150 ease-out",
-                      "group-hover:scale-100 group-hover:opacity-100",
-                      "group-focus-within:scale-100 group-focus-within:opacity-100",
-                    )}
-                    aria-hidden
-                  />
-                </button>
-                <span className="min-w-0 truncate">{name || displayPath}</span>
-              </div>
+                    aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
+                  >
+                    <FileText
+                      className={cn(
+                        "absolute h-4 w-4 transition-all duration-150 ease-out",
+                        "opacity-100 group-hover:scale-75 group-hover:opacity-0",
+                        "group-focus-within:scale-75 group-focus-within:opacity-0",
+                      )}
+                      aria-hidden
+                    />
+                    <X
+                      className={cn(
+                        "absolute h-3.5 w-3.5 scale-75 opacity-0 transition-all duration-150 ease-out",
+                        "group-hover:scale-100 group-hover:opacity-100",
+                        "group-focus-within:scale-100 group-focus-within:opacity-100",
+                      )}
+                      aria-hidden
+                    />
+                  </button>
+                  <span className="min-w-0 truncate">{name || displayPath}</span>
+                </div>
+                {onRestore ? (
+                  <button
+                    type="button"
+                    onClick={onRestore}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label={t("filePreview.restore", { defaultValue: "Restore" })}
+                  >
+                    <Minimize2 className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </>
             ) : (
               <>
                 <button
@@ -201,6 +217,16 @@ export function FilePreviewPanel({
                 <span className="min-w-0 truncate text-sm font-medium">
                   {name || displayPath}
                 </span>
+                {onRestore ? (
+                  <button
+                    type="button"
+                    onClick={onRestore}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label={t("filePreview.restore", { defaultValue: "Restore" })}
+                  >
+                    <Minimize2 className="h-5 w-5" />
+                  </button>
+                ) : null}
               </>
             )}
           </div>
@@ -244,6 +270,23 @@ export function FilePreviewPanel({
                   <span className="truncate">{previewPath}</span>
                 )}
               </div>
+              {state.status === "ready" && isRenderableFile(state.payload.language) && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode(viewMode === "preview" ? "source" : "preview")}
+                  className={cn(
+                    "ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                    "text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground",
+                  )}
+                  aria-label={viewMode === "preview" ? t("filePreview.viewSource") : t("filePreview.viewPreview")}
+                >
+                  {viewMode === "preview" ? (
+                    <Code2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
@@ -260,21 +303,21 @@ export function FilePreviewPanel({
                   </div>
                 </div>
               ) : (
-                <div className="min-h-full">
+                <div className="h-full flex flex-col">
                   {state.payload.truncated ? (
-                    <div className="mx-4 mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                    <div className="mx-4 mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200 shrink-0">
                       {t("filePreview.truncated", {
                         defaultValue: "Preview is truncated because this file is large.",
                       })}
                     </div>
                   ) : null}
-                  <CodeBlock
+                  <FilePreviewContent
                     language={state.payload.language}
-                    code={state.payload.content}
-                    chrome="none"
+                    content={state.payload.content}
+                    viewMode={viewMode}
                     showLineNumbers
                     wrapLongLines={false}
-                    className="min-h-full"
+                    className="flex-1 min-h-0"
                   />
                 </div>
               )}

@@ -9,6 +9,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   type PromptAnchor,
   userPromptAnchors,
 } from "@/components/thread/promptNavigation";
@@ -45,21 +51,30 @@ export function PromptNavigator({
     onJumpToPrompt(promptId);
   };
 
+  const openLabel = t("thread.promptNavigator.open");
+
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={cn(
-          "host-no-drag h-8 w-8 rounded-full text-muted-foreground/80",
-          "hover:bg-accent/40 hover:text-foreground",
-        )}
-        aria-label={t("thread.promptNavigator.open")}
-        onClick={() => setOpen(true)}
-      >
-        <ListTree className="h-4 w-4" />
-      </Button>
+      <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "host-no-drag h-8 w-8 rounded-full text-muted-foreground/80",
+                "hover:bg-accent/40 hover:text-foreground",
+              )}
+              aria-label={openLabel}
+              onClick={() => setOpen(true)}
+            >
+              <ListTree className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{openLabel}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent

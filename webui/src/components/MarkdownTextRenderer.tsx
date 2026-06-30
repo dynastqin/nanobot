@@ -34,6 +34,7 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 }
 
 type MarkdownAstNode = {
@@ -391,6 +392,7 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   onOpenFilePreview,
+  onOpenLink,
 }: MarkdownTextRendererProps) {
   const components = useMemo<Components>(
     () => ({
@@ -485,12 +487,18 @@ export default function MarkdownTextRenderer({
         if (isNonNavigableFilePatternLink(href)) {
           return <>{markdownChildren}</>;
         }
+        const isHttpLink = href && /^https?:\/\//i.test(href);
         return (
           <a
             href={href}
             target="_blank"
             rel="noreferrer noopener"
             className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+            onClick={isHttpLink && onOpenLink ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenLink(href!);
+            } : undefined}
             {...props}
           >
             {markdownChildren}
@@ -575,7 +583,7 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview],
+    [highlightCode, onOpenFilePreview, onOpenLink],
   );
 
   return (

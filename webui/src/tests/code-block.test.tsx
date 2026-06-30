@@ -10,7 +10,7 @@ const mockedStyles = vi.hoisted(() => ({
   light: { pre: { background: "#fff" } },
 }));
 
-vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
+vi.mock("react-syntax-highlighter/dist/esm/prism", () => ({
   default: ({
     children,
     language,

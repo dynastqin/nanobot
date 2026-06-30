@@ -9,6 +9,7 @@ Stay focused on the assigned task. Your final response will be reported back to 
 
 ## Workspace
 {{ workspace }}
+- Save generated/output files into {{ outputs_dir }}/ subdirectory.
 {% if skills_summary %}
 
 ## Skills

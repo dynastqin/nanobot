@@ -80,6 +80,7 @@ from nanobot.webui.sidebar_state import (
 from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.workspace_files import WebUIWorkspaceFilesError, list_workspace_files
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
@@ -357,6 +358,14 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_file_preview(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/file-download$", got)
+        if m:
+            return self._handle_file_download(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/workspace-files$", got)
+        if m:
+            return self._handle_workspace_files(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/automations$", got)
         if m:
             return self._handle_session_automations(request, m.group(1))
@@ -474,6 +483,68 @@ class GatewayHTTPHandler:
                 scope=self.workspaces.scope_for_session_key(decoded_key),
             )
         except WebUIFilePreviewError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(payload)
+
+    def _handle_file_download(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        raw_path = _query_first(_parse_query(request.path), "path")
+        cleaned = (raw_path or "").strip()
+        if not cleaned:
+            return _http_error(400, "missing path")
+        if len(cleaned) > 4096:
+            return _http_error(400, "path is too long")
+        from pathlib import Path as _Path
+        from nanobot.security.workspace_policy import resolve_allowed_path, WorkspaceBoundaryError
+        scope = self.workspaces.scope_for_session_key(decoded_key)
+        try:
+            resolved = resolve_allowed_path(
+                cleaned,
+                workspace=scope.project_path,
+                allowed_root=scope.project_path,
+                strict=True,
+            )
+        except FileNotFoundError:
+            return _http_error(404, "file not found")
+        except WorkspaceBoundaryError as e:
+            return _http_error(403, str(e))
+        except OSError:
+            return _http_error(400, "invalid path")
+        if not resolved.is_file():
+            return _http_error(404, "file not found")
+        try:
+            raw = resolved.read_bytes()
+        except OSError as e:
+            return _http_error(500, f"failed to read file: {e}")
+        filename = resolved.name
+        mime_type, _ = mimetypes.guess_type(filename)
+        if not mime_type:
+            mime_type = "application/octet-stream"
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        return Response(200, headers, raw, media_type=mime_type)
+
+    def _handle_workspace_files(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        subpath = _query_first(_parse_query(request.path), "path") or "."
+        try:
+            payload = list_workspace_files(
+                self.workspaces.scope_for_session_key(decoded_key),
+                subpath=subpath,
+                session_key=decoded_key,
+            )
+        except WebUIWorkspaceFilesError as e:
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
 
