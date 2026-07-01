@@ -1001,6 +1001,9 @@
     "scrollToBottom": "滚动到底部",
     "loadEarlier": "加载更早消息",
     "forkedFromHistory": "从历史消息分叉",
+    "compaction": {
+      "banner": "更早的消息已被压缩 — {{count}} 条消息于 {{time}} 压缩"
+    },
     "promptNavigator": {
       "open": "打开输入导航",
       "title": "输入列表",

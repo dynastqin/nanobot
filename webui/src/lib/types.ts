@@ -910,6 +910,12 @@ export interface WebuiThreadPagePayload {
   user_message_offset?: number;
 }
 
+export interface CompactionInfo {
+  summary: string;
+  consolidated_count: number;
+  last_active: string | null;
+}
+
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
@@ -919,6 +925,7 @@ export interface WebuiThreadPersistedPayload {
   has_pending_tool_calls?: boolean;
   page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
+  compaction?: CompactionInfo | null;
 }
 
 export interface FilePreviewPayload {

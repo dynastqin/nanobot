@@ -324,6 +324,7 @@ export function ThreadShell({
     refresh: refreshHistory,
     version: historyVersion,
     forkBoundaryMessageCount,
+    compaction,
   } = useSessionHistory(historyKey);
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
@@ -916,6 +917,7 @@ export function ThreadShell({
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           forkBoundaryMessageCount={forkBoundaryMessageCount}
+          compaction={compaction}
           hasMoreBefore={hasMoreBefore}
           loadingOlder={loadingOlder}
           userMessageOffset={userMessageOffset}

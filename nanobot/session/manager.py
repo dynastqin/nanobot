@@ -736,6 +736,7 @@ class SessionManager:
             created_at: str | None = None
             updated_at: str | None = None
             stored_key: str | None = None
+            last_consolidated: int = 0
             with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -747,6 +748,7 @@ class SessionManager:
                         created_at = data.get("created_at")
                         updated_at = data.get("updated_at")
                         stored_key = data.get("key")
+                        last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
             return {
@@ -755,6 +757,7 @@ class SessionManager:
                 "updated_at": updated_at,
                 "metadata": metadata,
                 "messages": messages,
+                "last_consolidated": last_consolidated,
             }
         except Exception as e:
             logger.warning("Failed to read session {}: {}", key, e)

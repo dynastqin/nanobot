@@ -1,9 +1,11 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Archive, ChevronDown } from "lucide-react";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import type { CliAppInfo, CompactionInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -13,6 +15,7 @@ interface ThreadMessagesProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   forkBoundaryMessageCount?: number | null;
+  compaction?: CompactionInfo | null;
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
@@ -68,6 +71,7 @@ export function ThreadMessages({
   cliApps = [],
   mcpPresets = [],
   forkBoundaryMessageCount = null,
+  compaction = null,
   onOpenFilePreview,
   onOpenLink,
   onForkFromMessage,
@@ -88,6 +92,7 @@ export function ThreadMessages({
 
   return (
     <div className="flex w-full flex-col">
+      {compaction ? <CompactionBanner info={compaction} /> : null}
       {units.map((unit, index) => {
         const prev = units[index - 1];
         const marginTop =
@@ -166,6 +171,51 @@ function unitIndexAfterMessageCount(
     if (seen >= messageCount) return i;
   }
   return null;
+}
+
+function CompactionBanner({ info }: { info: CompactionInfo }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+
+  const timeLabel = useMemo(() => {
+    if (!info.last_active) return "";
+    try {
+      const d = new Date(info.last_active);
+      return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+    } catch {
+      return "";
+    }
+  }, [info.last_active]);
+
+  return (
+    <div className="mb-4 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 text-[11px] text-muted-foreground/80 hover:text-muted-foreground"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <Archive aria-hidden className="size-3 shrink-0" />
+        <span className="flex-1 text-left">
+          {t("thread.compaction.banner", {
+            count: info.consolidated_count,
+            time: timeLabel,
+          })}
+        </span>
+        <ChevronDown
+          aria-hidden
+          className={cn(
+            "size-3 shrink-0 transition-transform",
+            expanded && "rotate-180",
+          )}
+        />
+      </button>
+      {expanded ? (
+        <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-muted-foreground/90">
+          {info.summary}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ForkBoundaryDivider({ label }: { label: string }) {

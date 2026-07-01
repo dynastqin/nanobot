@@ -13,6 +13,7 @@ import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { deriveTitle } from "@/lib/format";
 import type {
   ChatSummary,
+  CompactionInfo,
   SessionAutomationJob,
   SessionDeleteResult,
   UIMessage,
@@ -191,6 +192,7 @@ export function useSessionHistory(key: string | null): {
   userMessageOffset: number;
   version: number;
   forkBoundaryMessageCount: number | null;
+  compaction: CompactionInfo | null;
   /** ``true`` when the replayed transcript ends with a trace row (turn still in flight). */
   hasPendingToolCalls: boolean;
 } {
@@ -208,6 +210,7 @@ export function useSessionHistory(key: string | null): {
     error: string | null;
     hasPendingToolCalls: boolean;
     forkBoundaryMessageCount: number | null;
+    compaction: CompactionInfo | null;
     beforeCursor: string | null;
     hasMoreBefore: boolean;
     userMessageOffset: number;
@@ -220,6 +223,7 @@ export function useSessionHistory(key: string | null): {
     error: null,
     hasPendingToolCalls: false,
     forkBoundaryMessageCount: null,
+    compaction: null,
     beforeCursor: null,
     hasMoreBefore: false,
     userMessageOffset: 0,
@@ -236,6 +240,7 @@ export function useSessionHistory(key: string | null): {
         error: null,
         hasPendingToolCalls: false,
         forkBoundaryMessageCount: null,
+        compaction: null,
         beforeCursor: null,
         hasMoreBefore: false,
         userMessageOffset: 0,
@@ -256,6 +261,7 @@ export function useSessionHistory(key: string | null): {
           error: null,
           hasPendingToolCalls: false,
           forkBoundaryMessageCount: null,
+          compaction: null,
           beforeCursor: null,
           hasMoreBefore: false,
           userMessageOffset: 0,
@@ -277,6 +283,7 @@ export function useSessionHistory(key: string | null): {
             error: null,
             hasPendingToolCalls: false,
             forkBoundaryMessageCount: null,
+            compaction: null,
             beforeCursor: null,
             hasMoreBefore: false,
             userMessageOffset: 0,
@@ -289,6 +296,7 @@ export function useSessionHistory(key: string | null): {
         const forkBoundary = typeof body.fork_boundary_message_count === "number"
           ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
           : null;
+        const compaction = body.compaction ?? null;
         setState((prev) => ({
           key,
           messages: ui,
@@ -297,6 +305,7 @@ export function useSessionHistory(key: string | null): {
           error: null,
           hasPendingToolCalls: hasPending,
           forkBoundaryMessageCount: forkBoundary,
+          compaction,
           beforeCursor: body.page?.before_cursor ?? null,
           hasMoreBefore: body.page?.has_more_before === true,
           userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
@@ -313,6 +322,7 @@ export function useSessionHistory(key: string | null): {
             error: null,
             hasPendingToolCalls: false,
             forkBoundaryMessageCount: null,
+            compaction: null,
             beforeCursor: null,
             hasMoreBefore: false,
             userMessageOffset: 0,
@@ -327,6 +337,7 @@ export function useSessionHistory(key: string | null): {
             error: (e as Error).message,
             hasPendingToolCalls: false,
             forkBoundaryMessageCount: null,
+            compaction: null,
             beforeCursor: null,
             hasMoreBefore: false,
             userMessageOffset: 0,
@@ -413,6 +424,7 @@ export function useSessionHistory(key: string | null): {
       userMessageOffset: 0,
       version: 0,
       forkBoundaryMessageCount: null,
+      compaction: null,
       hasPendingToolCalls: false,
     };
   }
@@ -431,6 +443,7 @@ export function useSessionHistory(key: string | null): {
       userMessageOffset: 0,
       version: 0,
       forkBoundaryMessageCount: null,
+      compaction: null,
       hasPendingToolCalls: false,
     };
   }
@@ -446,6 +459,7 @@ export function useSessionHistory(key: string | null): {
     userMessageOffset: state.userMessageOffset,
     version: state.version,
     forkBoundaryMessageCount: state.forkBoundaryMessageCount,
+    compaction: state.compaction,
     hasPendingToolCalls: state.hasPendingToolCalls,
   };
 }

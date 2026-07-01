@@ -1001,6 +1001,9 @@
     "scrollToBottom": "Scroll to bottom",
     "loadEarlier": "Load earlier messages",
     "forkedFromHistory": "Forked from history",
+    "compaction": {
+      "banner": "Earlier messages were summarized — {{count}} messages compacted at {{time}}"
+    },
     "promptNavigator": {
       "open": "Open prompt navigator",
       "title": "Prompts",

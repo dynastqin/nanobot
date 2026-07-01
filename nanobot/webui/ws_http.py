@@ -466,6 +466,22 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
+        compaction = None
+        if isinstance(session_data, dict):
+            metadata = session_data.get("metadata")
+            if isinstance(metadata, dict):
+                last_summary = metadata.get("_last_summary")
+                if (
+                    isinstance(last_summary, dict)
+                    and last_summary.get("text")
+                    and last_summary["text"] != "(nothing)"
+                ):
+                    compaction = {
+                        "summary": last_summary["text"],
+                        "consolidated_count": session_data.get("last_consolidated", 0),
+                        "last_active": last_summary.get("last_active"),
+                    }
+        data["compaction"] = compaction
         return _http_json_response(data)
 
     def _handle_file_preview(self, request: WsRequest, key: str) -> Response:
