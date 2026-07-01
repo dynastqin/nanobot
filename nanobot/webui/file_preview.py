@@ -12,6 +12,8 @@ from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_al
 
 MAX_FILE_PREVIEW_BYTES = 384 * 1024
 
+_GFM_TABLE_DELIMITER_RE = re.compile(r"^((?:\|[ \t]*[-:]+[ \t]*)+\|)\s*$", re.MULTILINE)
+
 
 class WebUIFilePreviewError(ValueError):
     """Raised when a file cannot be previewed through the WebUI."""
@@ -70,11 +72,14 @@ def file_preview_payload(
         content = preview_bytes.decode("utf-8", errors="replace")
 
     display_path = _display_path(resolved, scope.project_path)
+    language = _language_for_path(resolved)
+    if language == "markdown":
+        content = _GFM_TABLE_DELIMITER_RE.sub(r" \1", content)
     return {
         "path": str(resolved),
         "display_path": display_path,
         "project_path": str(scope.project_path),
-        "language": _language_for_path(resolved),
+        "language": language,
         "content": content,
         "size": resolved.stat().st_size,
         "truncated": truncated,

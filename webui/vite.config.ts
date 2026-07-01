@@ -33,11 +33,14 @@ export default defineConfig(({ mode }) => {
             if (id.includes("node_modules/refractor/")) {
               return "syntax-highlight";
             }
+            if (id.includes("node_modules/hastscript")
+              || id.includes("node_modules/parse-entities")
+            ) {
+              return "markdown-vendor";
+            }
             if (
               id.includes("node_modules/react-syntax-highlighter")
               || id.includes("node_modules/prismjs/")
-              || id.includes("node_modules/hastscript")
-              || id.includes("node_modules/parse-entities")
             ) {
               return "syntax-highlight";
             }

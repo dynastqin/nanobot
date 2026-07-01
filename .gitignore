@@ -8,6 +8,7 @@
 .orion
 
 # Claude / AI assistant artifacts
+.mcp.json
 docs/superpowers/
 docs/plans/
 
@@ -87,6 +88,7 @@ Desktop.ini
 *~
 nano.*.save
 .codegraph/
+.vxnotes/
 
 # Environment & secrets (keep examples tracked if needed)
 .env.*

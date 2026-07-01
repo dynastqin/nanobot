@@ -19,6 +19,7 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     find_legal_message_start,
     image_placeholder_text,
+    outputs_dir_for_session,
     recent_message_start_index,
     safe_filename,
     strip_think,
@@ -656,6 +657,12 @@ class SessionManager:
                 deleted = True
             except OSError as e:
                 logger.warning("Failed to delete session file {}: {}", path, e)
+        outputs_dir = self.workspace / outputs_dir_for_session(key)
+        if outputs_dir.exists():
+            try:
+                shutil.rmtree(outputs_dir)
+            except OSError as e:
+                logger.warning("Failed to clean up outputs directory {}: {}", outputs_dir, e)
         return deleted
 
     def fork_session_before_user_index(
