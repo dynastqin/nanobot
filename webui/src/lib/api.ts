@@ -318,6 +318,124 @@ export async function fetchSkillDetail(
   );
 }
 
+export async function toggleSkill(
+  token: string,
+  name: string,
+  enable: boolean,
+  base: string = "",
+): Promise<SkillsPayload> {
+  return request<SkillsPayload>(
+    `${base}/api/webui/skills/toggle?name=${encodeURIComponent(name)}&enable=${enable}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSkillFiles(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<WorkspaceFilesPayload> {
+  return request<WorkspaceFilesPayload>(
+    `${base}/api/webui/skills/${encodeURIComponent(name)}/files`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSkillFilePreview(
+  token: string,
+  name: string,
+  path: string,
+  base: string = "",
+): Promise<FilePreviewPayload> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  return request<FilePreviewPayload>(
+    `${base}/api/webui/skills/${encodeURIComponent(name)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export function skillFileDownloadUrl(
+  name: string,
+  path: string,
+  base: string = "",
+): string {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  return `${base}/api/webui/skills/${encodeURIComponent(name)}/file-download?${query}`;
+}
+
+export async function downloadSkillFile(
+  token: string,
+  name: string,
+  path: string,
+  base: string = "",
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    skillFileDownloadUrl(name, path, base),
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = typeof res.text === "function" ? (await res.text()).trim() : "";
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const filename = path.split("/").pop() || "file";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function skillZipDownloadUrl(
+  name: string,
+  base: string = "",
+): string {
+  return `${base}/api/webui/skills/${encodeURIComponent(name)}/download`;
+}
+
+export async function downloadSkillZip(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    skillZipDownloadUrl(name, base),
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = typeof res.text === "function" ? (await res.text()).trim() : "";
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${name}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function deleteSession(
   token: string,
   key: string,

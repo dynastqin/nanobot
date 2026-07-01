@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "不可用原因",
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "沒有原始說明。",
-      "detailDescription": "{{name}} 的詳細資訊。"
+      "detailDescription": "{{name}} 的詳細資訊。",
+      "tabLabel": "技能",
+      "statusDisabled": "已禁用",
+      "disabledPill": "已禁用",
+      "enabled": "啟用",
+      "toggleFailed": "切換技能狀態失敗。"
     },
     "voice": {
       "selectProvider": "選擇提供商",

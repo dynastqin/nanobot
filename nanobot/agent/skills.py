@@ -45,21 +45,23 @@ class SkillsLoader:
             name = skill_dir.name
             if skip_names is not None and name in skip_names:
                 continue
-            entries.append({"name": name, "path": str(skill_file), "source": source})
+            disabled = (skill_dir / ".disabled").exists()
+            entries.append({"name": name, "path": str(skill_file), "source": source, "disabled": disabled})
         return entries
 
-    def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
+    def list_skills(self, filter_unavailable: bool = True, *, include_disabled: bool = False) -> list[dict[str, str]]:
         """
         List all available skills.
 
         Args:
             filter_unavailable: If True, filter out skills with unmet requirements.
+            include_disabled: If True, include skills marked with .disabled file.
 
         Returns:
-            List of skill info dicts with 'name', 'path', 'source'.
+            List of skill info dicts with 'name', 'path', 'source', 'disabled'.
         """
         skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        workspace_names = {entry["name"] for entry in skills}
+        workspace_names = {entry["name"] for entry in skills if not entry.get("disabled")}
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(
                 self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
@@ -68,9 +70,34 @@ class SkillsLoader:
         if self.disabled_skills:
             skills = [s for s in skills if s["name"] not in self.disabled_skills]
 
+        if not include_disabled:
+            skills = [s for s in skills if not s.get("disabled")]
+
         if filter_unavailable:
             return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
         return skills
+
+    def toggle_skill(self, name: str, enable: bool) -> tuple[bool, str]:
+        """Create or remove .disabled marker in a workspace skill directory.
+
+        Args:
+            name: Skill name (directory name).
+            enable: True to enable (remove marker), False to disable (create marker).
+
+        Returns:
+            Tuple of (success, error_message). error_message is empty on success.
+        """
+        skill_dir = self.workspace_skills / name
+        if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():
+            return False, f"Workspace skill '{name}' not found."
+        marker = skill_dir / ".disabled"
+        if enable:
+            if marker.exists():
+                marker.unlink()
+            return True, ""
+        else:
+            marker.touch()
+            return True, ""
 
     def load_skill(self, name: str) -> str | None:
         """

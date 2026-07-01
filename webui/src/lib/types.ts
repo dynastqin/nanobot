@@ -163,6 +163,7 @@ export interface SkillSummary {
   source: "workspace" | "builtin" | string;
   available: boolean;
   unavailable_reason?: string;
+  disabled?: boolean;
 }
 
 export interface SkillRequirements {
@@ -175,6 +176,7 @@ export interface SkillRequirements {
 export interface SkillDetail extends SkillSummary {
   requirements: SkillRequirements;
   raw_markdown: string;
+  files?: WorkspaceFileNode;
 }
 
 export interface SkillsPayload { skills: SkillSummary[]; }

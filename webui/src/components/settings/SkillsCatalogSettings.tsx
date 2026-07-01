@@ -1,18 +1,48 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { TFunction } from "i18next";
-import { Brain, Check, CircleAlert, KeyRound, Loader2, Terminal } from "lucide-react";
+import {
+  Brain,
+  Check,
+  CircleAlert,
+  Code2,
+  Copy,
+  Download,
+  Eye,
+  GripVertical,
+  KeyRound,
+  Loader2,
+  PanelRight,
+  Terminal,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { fetchSkillDetail } from "@/lib/api";
-import type { SkillDetail, SkillSummary } from "@/lib/types";
+import { Switch } from "@/components/ui/switch";
+import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
+import { FileTreeNode } from "@/components/FileTree";
+import { Button } from "@/components/ui/button";
+import {
+  ApiError,
+  downloadSkillZip,
+  fetchSkillDetail,
+  fetchSkillFilePreview,
+  fetchSkillFiles,
+  toggleSkill,
+} from "@/lib/api";
+import type { FilePreviewPayload, SkillDetail, SkillSummary, WorkspaceFileNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
+export function SkillsCatalogSettings({ skills: initialSkills }: { skills: SkillSummary[] }) {
   const { t } = useTranslation();
-  const availableCount = skills.filter((skill) => skill.available).length;
+  const [skills, setSkills] = useState<SkillSummary[]>(initialSkills);
+  const availableCount = skills.filter((skill) => skill.available && !skill.disabled).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
+
+  useEffect(() => {
+    setSkills(initialSkills);
+  }, [initialSkills]);
 
   return (
     <div className="space-y-7">
@@ -63,6 +93,11 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         onOpenChange={(open) => {
           if (!open) setSelectedSkill(null);
         }}
+        onSkillsUpdate={(updatedSkills) => {
+          setSkills(updatedSkills);
+          const refreshed = updatedSkills.find((s) => s.name === selectedSkill?.name);
+          if (refreshed) setSelectedSkill(refreshed);
+        }}
       />
     </div>
   );
@@ -78,9 +113,12 @@ function SkillCatalogRow({
   const { t } = useTranslation();
   const sourceLabel = skillSourceLabel(skill.source, t);
   const StatusIcon = skill.available ? Check : CircleAlert;
-  const statusLabel = skill.available
-    ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
-    : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
+  const isDisabled = skill.source === "workspace" && skill.disabled;
+  const statusLabel = isDisabled
+    ? t("settings.skills.statusDisabled", { defaultValue: "Disabled" })
+    : skill.available
+      ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
+      : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
 
   return (
     <button
@@ -93,7 +131,8 @@ function SkillCatalogRow({
       className={cn(
         "group flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-3 text-left transition-colors",
         "hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        !skill.available && "opacity-65",
+        !skill.available && !isDisabled && "opacity-65",
+        isDisabled && "opacity-50",
       )}
     >
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-muted/70 text-muted-foreground">
@@ -111,7 +150,7 @@ function SkillCatalogRow({
         <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
           {skill.description}
         </p>
-        {!skill.available && skill.unavailable_reason ? (
+        {!skill.available && skill.unavailable_reason && !isDisabled ? (
           <p className="mt-1 truncate text-[12px] leading-4 text-muted-foreground/80">
             {t("settings.skills.unavailableReason", {
               reason: skill.unavailable_reason,
@@ -124,12 +163,14 @@ function SkillCatalogRow({
         title={!skill.available && skill.unavailable_reason ? skill.unavailable_reason : undefined}
         className={cn(
           "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium sm:inline-flex",
-          skill.available
-            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            : "bg-muted text-muted-foreground",
+          isDisabled
+            ? "bg-muted text-muted-foreground"
+            : skill.available
+              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : "bg-muted text-muted-foreground",
         )}
       >
-        <StatusIcon className="h-3.5 w-3.5" aria-hidden />
+        {isDisabled ? null : <StatusIcon className="h-3.5 w-3.5" aria-hidden />}
         {statusLabel}
       </span>
     </button>
@@ -140,16 +181,53 @@ function SkillDetailSheet({
   skill,
   open,
   onOpenChange,
+  onSkillsUpdate,
 }: {
   skill: SkillSummary | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSkillsUpdate: (skills: SkillSummary[]) => void;
 }) {
   const { token } = useClient();
   const { t } = useTranslation();
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [sheetWidth, setSheetWidth] = useState(544);
+  const [entered, setEntered] = useState(false);
+  const sheetWidthRef = useRef(544);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    sheetWidthRef.current = sheetWidth;
+  }, [sheetWidth]);
+
+  const handleSheetResize = useCallback((e: ReactPointerEvent<HTMLButtonElement>) => {
+    const startX = e.clientX;
+    const startWidth = sheetWidthRef.current;
+    const onMove = (ev: PointerEvent) => {
+      const delta = startX - ev.clientX;
+      const next = Math.max(0, startWidth + delta);
+      sheetWidthRef.current = next;
+      setSheetWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      if (sheetWidthRef.current < 200) {
+        onOpenChange(false);
+      }
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    e.preventDefault();
+  }, [onOpenChange]);
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -157,6 +235,7 @@ function SkillDetailSheet({
     setDetail(null);
     setLoading(true);
     setLoadFailed(false);
+    setToggleError(null);
     fetchSkillDetail(token, skill.name)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
@@ -176,17 +255,63 @@ function SkillDetailSheet({
 
   const activeSkill = detail ?? skill;
   const sourceLabel = skillSourceLabel(activeSkill.source, t);
-  const statusLabel = activeSkill.available
-    ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
-    : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
+  const isWorkspace = activeSkill.source === "workspace";
+  const isDisabled = activeSkill.disabled ?? false;
+  const statusLabel = isWorkspace && isDisabled
+    ? t("settings.skills.statusDisabled", { defaultValue: "Disabled" })
+    : activeSkill.available
+      ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
+      : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
+
+  const handleToggle = async () => {
+    setToggling(true);
+    setToggleError(null);
+    try {
+      const payload = await toggleSkill(token, skill.name, isDisabled);
+      const updatedSkills = payload.skills;
+      onSkillsUpdate(updatedSkills);
+      const updatedSkill = updatedSkills.find((s) => s.name === skill.name);
+      if (updatedSkill) {
+        setDetail((prev) => prev ? { ...prev, disabled: updatedSkill.disabled } : prev);
+      }
+    } catch (err) {
+      setToggleError(
+        err instanceof Error ? err.message : t("settings.skills.toggleFailed", { defaultValue: "Failed to toggle skill." }),
+      );
+    } finally {
+      setToggling(false);
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-[min(34rem,calc(100vw-1rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+        style={{
+          "--sheet-width": `${sheetWidth}px`,
+          "--sheet-slot-width": !entered ? "0px" : `${sheetWidth}px`,
+          width: `min(calc(100vw - 1rem), var(--sheet-slot-width))`,
+        } as CSSProperties}
       >
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <button
+          type="button"
+          aria-label={t("settings.skills.sheetResize", { defaultValue: "Resize panel" })}
+          className={cn(
+            "group absolute inset-y-0 left-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none md:flex",
+            "items-stretch justify-center focus-visible:outline-none",
+          )}
+          onPointerDown={handleSheetResize}
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
+              "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
+            )}
+          />
+        </button>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 flex flex-col">
           <div className="flex items-start gap-3 pr-8">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[15px] bg-muted/70 text-muted-foreground">
               <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
@@ -203,10 +328,32 @@ function SkillDetailSheet({
               </SheetDescription>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
                 <Pill>{sourceLabel}</Pill>
-                <Pill tone={activeSkill.available ? "success" : "muted"}>{statusLabel}</Pill>
+                <Pill tone={isWorkspace && isDisabled ? "muted" : activeSkill.available ? "success" : "muted"}>{statusLabel}</Pill>
               </div>
             </div>
           </div>
+
+          {isWorkspace ? (
+            <div className="mt-5 flex items-center justify-between rounded-[16px] bg-muted/35 px-4 py-3">
+              <span className="text-[13px] font-medium text-foreground">
+                {t("settings.skills.enabled", { defaultValue: "Enabled" })}
+              </span>
+              <div className="flex items-center gap-2">
+                {toggling ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden /> : null}
+                <Switch
+                  checked={!isDisabled}
+                  onCheckedChange={handleToggle}
+                  disabled={toggling}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {toggleError ? (
+            <div className="mt-3 rounded-[12px] bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+              {toggleError}
+            </div>
+          ) : null}
 
           {loading ? (
             <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
@@ -218,7 +365,7 @@ function SkillDetailSheet({
               {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
             </div>
           ) : (
-            <div className="mt-7 space-y-6">
+            <div className="mt-7 flex flex-col min-h-0 flex-1 gap-6">
               <DetailSection title={t("settings.skills.descriptionTitle", { defaultValue: "Description" })}>
                 <p className="text-[14px] leading-6 text-muted-foreground">{activeSkill.description}</p>
               </DetailSection>
@@ -234,7 +381,7 @@ function SkillDetailSheet({
                 />
               </div>
 
-              {!activeSkill.available && activeSkill.unavailable_reason ? (
+              {!activeSkill.available && activeSkill.unavailable_reason && !(isWorkspace && isDisabled) ? (
                 <DetailSection
                   title={t("settings.skills.unavailableReasonLabel", {
                     defaultValue: "Unavailable reason",
@@ -248,7 +395,7 @@ function SkillDetailSheet({
 
               {detail ? <RequirementsSection detail={detail} /> : null}
 
-              {detail ? <RawInstructionsBlock markdown={detail.raw_markdown} /> : null}
+              {detail ? <SkillFilesPanel skillName={skill.name} token={token} /> : null}
             </div>
           )}
         </div>
@@ -257,33 +404,323 @@ function SkillDetailSheet({
   );
 }
 
-function RawInstructionsBlock({ markdown }: { markdown: string }) {
+function SkillFilesPanel({ skillName, token }: { skillName: string; token: string }) {
   const { t } = useTranslation();
-  const content =
-    markdown ||
-    t("settings.skills.rawInstructionsEmpty", {
-      defaultValue: "No raw instructions.",
-    });
+  const [tree, setTree] = useState<WorkspaceFileNode | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const [previewUnsupported, setPreviewUnsupported] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const [copied, setCopied] = useState(false);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const [treeWidth, setTreeWidth] = useState(220);
+  const treeResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const autoSelectRef = useRef(false);
+
+  const loadTree = useCallback(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    fetchSkillFiles(token, skillName)
+      .then((payload) => {
+        if (!cancelled) {
+          setTree(payload.tree);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError(true);
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [token, skillName]);
+
+  useEffect(() => {
+    if (!skillName) return;
+    const cancel = loadTree();
+    return cancel;
+  }, [loadTree, skillName]);
+
+  useEffect(() => {
+    if (!tree || autoSelectRef.current) return;
+    const findSkilMd = (node: WorkspaceFileNode): string | null => {
+      if (node.type === "file" && node.name === "SKILL.md") return node.path;
+      if (node.children) {
+        for (const child of node.children) {
+          const found = findSkilMd(child);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    const skilPath = findSkilMd(tree);
+    if (skilPath) {
+      autoSelectRef.current = true;
+      setSelectedPath(skilPath);
+    }
+  }, [tree]);
+
+  useEffect(() => {
+    if (!selectedPath) return;
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(false);
+    setPreviewUnsupported(false);
+    setPreview(null);
+    setViewMode("preview");
+    (async () => {
+      try {
+        const payload = await fetchSkillFilePreview(token, skillName, selectedPath);
+        if (!cancelled) setPreview(payload);
+      } catch (err) {
+        if (!cancelled) {
+          if (err instanceof ApiError && err.status === 415) {
+            setPreviewUnsupported(true);
+          } else {
+            setPreviewError(true);
+          }
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPath, token, skillName]);
+
+  const selectFile = useCallback((path: string) => {
+    setSelectedPath(path);
+    if (treeCollapsed) setTreeCollapsed(false);
+  }, [treeCollapsed]);
+
+  const handleCopy = useCallback(async () => {
+    if (!preview?.content) return;
+    try {
+      await navigator.clipboard.writeText(preview.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  }, [preview]);
+
+  const handleTreeResizeStart = useCallback((e: ReactPointerEvent<HTMLButtonElement>) => {
+    const startX = e.clientX;
+    const startWidth = treeWidth;
+    treeResizeRef.current = { startX, startWidth };
+    const onMove = (ev: PointerEvent) => {
+      if (!treeResizeRef.current) return;
+      const delta = ev.clientX - treeResizeRef.current.startX;
+      const next = Math.max(140, Math.min(480, treeResizeRef.current.startWidth + delta));
+      setTreeWidth(next);
+    };
+    const onUp = () => {
+      treeResizeRef.current = null;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    e.preventDefault();
+  }, [treeWidth]);
+
+  const treeChildren = tree?.children;
 
   return (
-    <details className="group rounded-[18px] border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="cursor-pointer select-none text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
-        {t("settings.skills.rawInstructions", { defaultValue: "Raw SKILL.md" })}
-      </summary>
-      <div className="mt-3 overflow-hidden rounded-[14px] border border-border/35 bg-background/70">
-        <pre
-          className={cn(
-            "max-h-[min(42vh,32rem)] overflow-auto overscroll-contain px-3.5 py-3 pr-4",
-            "whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.7] text-foreground/62",
-            "scrollbar-thin scrollbar-track-transparent",
-            "[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar]:w-1.5",
-            "[&::-webkit-scrollbar-thumb]:bg-muted-foreground/25",
-          )}
+    <DetailSection
+      title={t("settings.skills.files", { defaultValue: "Files" })}
+      className="flex flex-col min-h-0 flex-1"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => {
+            downloadSkillZip(token, skillName).catch(() => {});
+          }}
+          aria-label={t("settings.skills.fileDownloadZip", { defaultValue: "Download skill as ZIP" })}
         >
-          {content}
-        </pre>
+          <Download className="h-3.5 w-3.5" />
+        </Button>
+      }
+    >
+      <div className="rounded-[16px] border border-border/45 overflow-hidden flex flex-col flex-1 min-h-0">
+        {loading ? (
+          <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            {t("settings.skills.fileLoading", { defaultValue: "Loading files..." })}
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-[13px] text-destructive">
+            <CircleAlert className="h-4 w-4" />
+            <span>{t("settings.skills.fileError", { defaultValue: "Could not load files." })}</span>
+            <Button variant="ghost" size="sm" onClick={loadTree} className="text-[12px]">
+              {t("settings.skills.fileRetry", { defaultValue: "Retry" })}
+            </Button>
+          </div>
+        ) : !treeChildren || treeChildren.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+            {t("settings.skills.fileEmpty", { defaultValue: "No files." })}
+          </div>
+        ) : (
+          <>
+            {/* Toolbar */}
+            {selectedPath && (
+              <div className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-border/45 bg-muted/30">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setTreeCollapsed(!treeCollapsed)}
+                  aria-label={treeCollapsed
+                    ? t("settings.skills.fileExpandTree", { defaultValue: "Expand file tree" })
+                    : t("settings.skills.fileCollapseTree", { defaultValue: "Collapse file tree" })
+                  }
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                </Button>
+                <span className="flex-1 truncate text-[12px] text-muted-foreground px-2">
+                  {selectedPath.split("/").pop()}
+                </span>
+                {preview && isRenderableFile(preview.language) && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setViewMode(viewMode === "preview" ? "source" : "preview")}
+                    aria-label={viewMode === "preview"
+                      ? t("settings.skills.fileViewSource", { defaultValue: "View source" })
+                      : t("settings.skills.fileViewPreview", { defaultValue: "View preview" })
+                    }
+                  >
+                    {viewMode === "preview" ? (
+                      <Code2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
+                {preview && isRenderableFile(preview.language) && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={handleCopy}
+                    aria-label={t("settings.skills.fileCopy", { defaultValue: "Copy content" })}
+                  >
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Body */}
+            <div className="flex-1 min-h-0 flex">
+              {/* Tree */}
+              <div
+                className={cn(
+                  "overflow-y-auto overflow-x-hidden border-r border-border/45 transition-[width] duration-200 ease-out",
+                  treeCollapsed ? "w-0 border-r-0" : "",
+                )}
+                style={{ width: treeCollapsed ? 0 : treeWidth }}
+              >
+                <div className="py-2">
+                  {treeChildren.map((child) => (
+                    <FileTreeNode
+                      key={child.path}
+                      node={child}
+                      depth={0}
+                      selectedPath={selectedPath}
+                      onSelect={selectFile}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Tree resize handle */}
+              {!treeCollapsed && (
+                <button
+                  type="button"
+                  aria-label={t("settings.skills.fileResizeTree", { defaultValue: "Resize file tree" })}
+                  className={cn(
+                    "group relative shrink-0 w-3 -ml-px cursor-col-resize touch-none",
+                    "flex items-center justify-center focus-visible:outline-none",
+                  )}
+                  onPointerDown={handleTreeResizeStart}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
+                      "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
+                    )}
+                  />
+                  <GripVertical
+                    aria-hidden
+                    className="absolute h-4 w-4 text-muted-foreground/30 opacity-0 transition-opacity group-hover:opacity-100"
+                  />
+                </button>
+              )}
+
+              {/* Preview */}
+              <div className="flex-1 min-w-0 overflow-y-auto bg-muted/20">
+                {!selectedPath ? (
+                  <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground px-4 text-center">
+                    {t("settings.skills.fileSelectPrompt", { defaultValue: "Select a file to preview" })}
+                  </div>
+                ) : previewLoading ? (
+                  <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    {t("settings.skills.filePreviewLoading", { defaultValue: "Loading..." })}
+                  </div>
+                ) : previewUnsupported ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-[13px] text-muted-foreground px-4 text-center">
+                    <CircleAlert className="h-5 w-5 text-amber-500/70" />
+                    <div>
+                      <p className="font-medium text-foreground/80">
+                        {t("settings.skills.filePreviewUnsupported", { defaultValue: "Preview not supported for this file type" })}
+                      </p>
+                      <p className="mt-1">
+                        {t("settings.skills.filePreviewUnsupportedHint", { defaultValue: "Please download to view the content." })}
+                      </p>
+                    </div>
+                  </div>
+                ) : previewError ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-2 text-[13px] text-destructive">
+                    <CircleAlert className="h-4 w-4" />
+                    <span>{t("settings.skills.filePreviewError", { defaultValue: "Could not load preview." })}</span>
+                  </div>
+                ) : preview ? (
+                  <div className="flex flex-col min-h-0 h-full p-3">
+                    <FilePreviewContent
+                      language={preview.language}
+                      content={preview.content}
+                      viewMode={viewMode}
+                      showLineNumbers
+                      className="flex-1 min-h-0"
+                    />
+                    {preview.truncated && (
+                      <div className="mt-2 text-[11px] text-muted-foreground shrink-0">
+                        {t("filePreview.truncated")}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </>
+        )}
       </div>
-    </details>
+    </DetailSection>
   );
 }
 
@@ -345,10 +782,13 @@ function RequirementsSection({ detail }: { detail: SkillDetail }) {
   );
 }
 
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+function DetailSection({ title, children, className, actions }: { title: string; children: ReactNode; className?: string; actions?: ReactNode }) {
   return (
-    <section>
-      <h3 className="mb-2 text-[12px] font-medium text-muted-foreground">{title}</h3>
+    <section className={className}>
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-[12px] font-medium text-muted-foreground">{title}</h3>
+        {actions}
+      </div>
       {children}
     </section>
   );

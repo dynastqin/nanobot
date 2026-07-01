@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "Lý do không khả dụng",
       "rawInstructions": "SKILL.md gốc",
       "rawInstructionsEmpty": "Không có hướng dẫn gốc.",
-      "detailDescription": "Chi tiết cho {{name}}."
+      "detailDescription": "Chi tiết cho {{name}}.",
+      "tabLabel": "Skills",
+      "statusDisabled": "Đã tắt",
+      "disabledPill": "Đã tắt",
+      "enabled": "Đã bật",
+      "toggleFailed": "Không thể chuyển đổi kỹ năng."
     },
     "voice": {
       "selectProvider": "Chon nha cung cap",

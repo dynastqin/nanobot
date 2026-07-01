@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "사용 불가 이유",
       "rawInstructions": "원본 SKILL.md",
       "rawInstructionsEmpty": "원본 지침이 없습니다.",
-      "detailDescription": "{{name}} 세부 정보."
+      "detailDescription": "{{name}} 세부 정보.",
+      "tabLabel": "Skills",
+      "statusDisabled": "비활성화",
+      "disabledPill": "비활성화",
+      "enabled": "활성화",
+      "toggleFailed": "스킬 전환에 실패했습니다."
     },
     "voice": {
       "selectProvider": "제공자 선택",

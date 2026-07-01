@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "利用不可の理由",
       "rawInstructions": "元の SKILL.md",
       "rawInstructionsEmpty": "元の説明はありません。",
-      "detailDescription": "{{name}} の詳細。"
+      "detailDescription": "{{name}} の詳細。",
+      "tabLabel": "Skills",
+      "statusDisabled": "無効",
+      "disabledPill": "無効",
+      "enabled": "有効",
+      "toggleFailed": "スキルの切り替えに失敗しました。"
     },
     "voice": {
       "selectProvider": "プロバイダーを選択",

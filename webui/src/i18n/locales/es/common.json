@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "Motivo de indisponibilidad",
       "rawInstructions": "SKILL.md original",
       "rawInstructionsEmpty": "No hay instrucciones originales.",
-      "detailDescription": "Detalles de {{name}}."
+      "detailDescription": "Detalles de {{name}}.",
+      "tabLabel": "Skills",
+      "statusDisabled": "Deshabilitado",
+      "disabledPill": "Deshabilitado",
+      "enabled": "Habilitado",
+      "toggleFailed": "No se pudo cambiar el estado de la skill."
     },
     "voice": {
       "selectProvider": "Seleccionar proveedor",

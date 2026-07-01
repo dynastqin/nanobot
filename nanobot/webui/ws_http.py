@@ -77,7 +77,15 @@ from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
-from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
+from nanobot.webui.skills_api import (
+    webui_skill_detail_payload,
+    webui_skill_file_download,
+    webui_skill_file_preview,
+    webui_skill_files,
+    webui_skill_toggle,
+    webui_skill_zip_download,
+    webui_skills_payload,
+)
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspace_files import WebUIWorkspaceFilesError, list_workspace_files
@@ -542,8 +550,8 @@ class GatewayHTTPHandler:
         mime_type, _ = mimetypes.guess_type(filename)
         if not mime_type:
             mime_type = "application/octet-stream"
-        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-        return Response(200, headers, raw, media_type=mime_type)
+        extra_headers = [("Content-Disposition", f'attachment; filename="{filename}"')]
+        return _http_response(raw, content_type=mime_type, extra_headers=extra_headers)
 
     def _handle_workspace_files(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
@@ -747,6 +755,20 @@ class GatewayHTTPHandler:
             return self._handle_workspaces(connection, request)
         if got == "/api/webui/skills":
             return self._handle_webui_skills(request)
+        if got == "/api/webui/skills/toggle":
+            return self._handle_webui_skill_toggle(request)
+        m = re.match(r"^/api/webui/skills/([^/]+)/files$", got)
+        if m:
+            return self._handle_webui_skill_files(request, m.group(1))
+        m = re.match(r"^/api/webui/skills/([^/]+)/file-preview$", got)
+        if m:
+            return self._handle_webui_skill_file_preview(request, m.group(1))
+        m = re.match(r"^/api/webui/skills/([^/]+)/file-download$", got)
+        if m:
+            return self._handle_webui_skill_file_download(request, m.group(1))
+        m = re.match(r"^/api/webui/skills/([^/]+)/download$", got)
+        if m:
+            return self._handle_webui_skill_zip_download(request, m.group(1))
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
             return self._handle_webui_skill_detail(request, m.group(1))
@@ -796,6 +818,106 @@ class GatewayHTTPHandler:
         if payload is None:
             return _http_error(404, "skill not found")
         return _http_json_response(payload)
+
+    def _handle_webui_skill_toggle(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from urllib.parse import unquote
+
+        query = _parse_query(request.path)
+        name = unquote(_query_first(query, "name") or "")
+        enable = _query_first(query, "enable") == "true"
+        if not name or "/" in name or "\\" in name:
+            return _http_error(400, "invalid skill name")
+        payload = webui_skill_toggle(
+            self.skills_workspace_path,
+            name,
+            enable,
+            disabled_skills=self.disabled_skills,
+        )
+        if not payload["ok"]:
+            return _http_error(400, payload["message"])
+        return _http_json_response(payload)
+
+    def _handle_webui_skill_files(self, request: WsRequest, raw_name: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from urllib.parse import unquote
+
+        name = unquote(raw_name)
+        if not name or "/" in name or "\\" in name:
+            return _http_error(400, "invalid skill name")
+        payload = webui_skill_files(
+            self.skills_workspace_path,
+            name,
+            disabled_skills=self.disabled_skills,
+        )
+        if payload is None:
+            return _http_error(404, "skill not found")
+        return _http_json_response(payload)
+
+    def _handle_webui_skill_file_preview(self, request: WsRequest, raw_name: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from urllib.parse import unquote
+
+        name = unquote(raw_name)
+        if not name or "/" in name or "\\" in name:
+            return _http_error(400, "invalid skill name")
+        raw_path = _query_first(_parse_query(request.path), "path")
+        if not raw_path:
+            return _http_error(400, "missing path")
+        payload = webui_skill_file_preview(
+            self.skills_workspace_path,
+            name,
+            raw_path,
+            disabled_skills=self.disabled_skills,
+        )
+        if payload is None:
+            return _http_error(404, "file not found")
+        return _http_json_response(payload)
+
+    def _handle_webui_skill_file_download(self, request: WsRequest, raw_name: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from urllib.parse import unquote
+
+        name = unquote(raw_name)
+        if not name or "/" in name or "\\" in name:
+            return _http_error(400, "invalid skill name")
+        raw_path = _query_first(_parse_query(request.path), "path")
+        if not raw_path:
+            return _http_error(400, "missing path")
+        result = webui_skill_file_download(
+            self.skills_workspace_path,
+            name,
+            raw_path,
+            disabled_skills=self.disabled_skills,
+        )
+        if result is None:
+            return _http_error(404, "file not found")
+        content, filename, mime_type = result
+        extra_headers = [("Content-Disposition", f'attachment; filename="{filename}"')]
+        return _http_response(content, content_type=mime_type, extra_headers=extra_headers)
+
+    def _handle_webui_skill_zip_download(self, request: WsRequest, raw_name: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from urllib.parse import unquote
+
+        name = unquote(raw_name)
+        if not name or "/" in name or "\\" in name:
+            return _http_error(400, "invalid skill name")
+        result = webui_skill_zip_download(
+            self.skills_workspace_path,
+            name,
+            disabled_skills=self.disabled_skills,
+        )
+        if result is None:
+            return _http_error(404, "skill not found")
+        content, filename = result
+        extra_headers = [("Content-Disposition", f'attachment; filename="{filename}"')]
+        return _http_response(content, content_type="application/zip", extra_headers=extra_headers)
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

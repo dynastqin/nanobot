@@ -85,3 +85,8 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelin
 
 - When adding new translation keys, only modify `en/common.json` and `zh-CN/common.json`.
 - Other locale files are maintained separately.
+
+## Plan Mode
+
+- Write plan files to `docs/plan/` with meaningful filenames (e.g. `docs/plan/webui-skills-file-tree.md`).
+- Do NOT write plans to `~/.claude/plans/`.

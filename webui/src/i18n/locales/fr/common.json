@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "Raison d’indisponibilité",
       "rawInstructions": "SKILL.md brut",
       "rawInstructionsEmpty": "Aucune instruction brute.",
-      "detailDescription": "Détails de {{name}}."
+      "detailDescription": "Détails de {{name}}.",
+      "tabLabel": "Skills",
+      "statusDisabled": "Désactivé",
+      "disabledPill": "Désactivé",
+      "enabled": "Activé",
+      "toggleFailed": "Échec du basculement de la compétence."
     },
     "voice": {
       "selectProvider": "Choisir un fournisseur",

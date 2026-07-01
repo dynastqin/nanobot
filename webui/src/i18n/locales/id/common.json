@@ -630,7 +630,12 @@
       "unavailableReasonLabel": "Alasan tidak tersedia",
       "rawInstructions": "SKILL.md mentah",
       "rawInstructionsEmpty": "Tidak ada instruksi mentah.",
-      "detailDescription": "Detail untuk {{name}}."
+      "detailDescription": "Detail untuk {{name}}.",
+      "tabLabel": "Skills",
+      "statusDisabled": "Nonaktif",
+      "disabledPill": "Nonaktif",
+      "enabled": "Aktif",
+      "toggleFailed": "Gagal mengalihkan skill."
     },
     "voice": {
       "selectProvider": "Pilih penyedia",
