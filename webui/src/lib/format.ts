@@ -101,6 +101,21 @@ export function fmtDateTime(
   return date ? dateTimeFormatter(activeLocale(locale)).format(date) : "";
 }
 
+/** Format epoch-ms timestamp as ``YYYY/MM/DD HH:MM:SS`` (local timezone).
+ *  Returns empty string for invalid/missing input. */
+export function formatMessageTime(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
 /** Human-readable turn duration (wall-clock), locale-aware via ``Intl`` (seconds/minutes). */
 export function formatTurnLatency(ms: number, locale?: string): string {
   const loc = activeLocale(locale);

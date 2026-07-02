@@ -1,11 +1,13 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Archive, ChevronDown } from "lucide-react";
+import { Avatar } from "@/components/Avatar";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { formatMessageTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, CompactionInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, CompactionInfo, McpPresetInfo, Role, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -64,6 +66,53 @@ export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
   return flags;
 }
 
+interface MessageRowProps {
+  role: Role;
+  /** First message timestamp (epoch ms) for the unit. */
+  timestamp: number | undefined;
+  className?: string;
+  children: ReactNode;
+}
+
+/**
+ * Wraps a message's content with the avatar on the correct side and
+ * the formatted timestamp below the content.
+ *
+ * User  side: row-reverse, content column right-aligned
+ * Assistant side: row, content column left-aligned
+ */
+function MessageRow({ role, timestamp, className, children }: MessageRowProps) {
+  const isUser = role === "user";
+  const timeLabel = formatMessageTime(timestamp);
+  return (
+    <div
+      className={cn(
+        "flex w-full gap-2.5",
+        isUser ? "flex-row-reverse" : "flex-row",
+        className,
+      )}
+    >
+      <Avatar role={role} />
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          isUser ? "items-end" : "items-start",
+        )}
+      >
+        {children}
+        {timeLabel ? (
+          <span
+            className="mt-1 text-[11px] leading-none text-muted-foreground tabular-nums"
+            title={timeLabel}
+          >
+            {timeLabel}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function ThreadMessages({
   messages,
   isStreaming = false,
@@ -119,34 +168,38 @@ export function ThreadMessages({
           <Fragment key={unitKeys[index]}>
             <div className={marginTop} data-user-prompt-id={userPromptId}>
               {unit.type === "activity" ? (
-                <AgentActivityCluster
-                  messages={unit.messages}
-                  isTurnStreaming={liveActivityClusterIndices.has(index)}
-                  hasBodyBelow={hasBodyBelow}
-                  turnLatencyMs={unit.turnLatencyMs}
-                  cliApps={cliApps}
-                  mcpPresets={mcpPresets}
-                  onOpenFilePreview={onOpenFilePreview}
-                  onOpenLink={onOpenLink}
-                />
+                <MessageRow role="assistant" timestamp={unit.messages[0]?.createdAt}>
+                  <AgentActivityCluster
+                    messages={unit.messages}
+                    isTurnStreaming={liveActivityClusterIndices.has(index)}
+                    hasBodyBelow={hasBodyBelow}
+                    turnLatencyMs={unit.turnLatencyMs}
+                    cliApps={cliApps}
+                    mcpPresets={mcpPresets}
+                    onOpenFilePreview={onOpenFilePreview}
+                    onOpenLink={onOpenLink}
+                  />
+                </MessageRow>
               ) : (
-                <MessageBubble
-                  message={unit.message}
-                  showAssistantCopyAction={
-                    unit.message.role === "assistant"
-                      ? copyFlags[index]
-                      : true
-                  }
-                  cliApps={cliApps}
-                  mcpPresets={mcpPresets}
-                  onOpenFilePreview={onOpenFilePreview}
-                  onOpenLink={onOpenLink}
-                  onForkFromHere={
-                    onForkFromMessage && forkIndex !== undefined
-                      ? () => onForkFromMessage(forkIndex)
-                      : undefined
-                  }
-                />
+                <MessageRow role={unit.message.role} timestamp={unit.message.createdAt}>
+                  <MessageBubble
+                    message={unit.message}
+                    showAssistantCopyAction={
+                      unit.message.role === "assistant"
+                        ? copyFlags[index]
+                        : true
+                    }
+                    cliApps={cliApps}
+                    mcpPresets={mcpPresets}
+                    onOpenFilePreview={onOpenFilePreview}
+                    onOpenLink={onOpenLink}
+                    onForkFromHere={
+                      onForkFromMessage && forkIndex !== undefined
+                        ? () => onForkFromMessage(forkIndex)
+                        : undefined
+                    }
+                  />
+                </MessageRow>
               )}
             </div>
             {index === forkBoundaryAfterUnitIndex ? (
