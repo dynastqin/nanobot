@@ -28,6 +28,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.plan import PlanTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -505,6 +506,11 @@ class AgentLoop:
                 MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
             )
             registered.append("my")
+
+        # Register plan tool's runtime context provider
+        plan_tool = self.tools.get("plan")
+        if plan_tool and isinstance(plan_tool, PlanTool):
+            self.context.register_runtime_context_provider(plan_tool.runtime_context_provider())
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 
