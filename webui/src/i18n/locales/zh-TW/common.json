@@ -1058,5 +1058,14 @@
       "usePath": "使用路徑",
       "absolutePathRequired": "請輸入這台機器上的絕對資料夾路徑。"
     }
+  },
+  "plan": {
+    "executing": "Executing",
+    "completed": "Completed",
+    "steps": "Steps",
+    "stepDone": "done",
+    "stepActive": "in progress",
+    "stepPending": "pending",
+    "stepBlocked": "blocked"
   }
 }

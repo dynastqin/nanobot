@@ -63,6 +63,14 @@ class GoalStateChanged:
 
 
 @dataclass(frozen=True)
+class PlanStateChanged:
+    """A session's plan state changed (created, updated, or completed)."""
+
+    context: RuntimeEventContext
+    plan: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class RuntimeModelChanged:
     """The active runtime model/preset changed."""
 
@@ -75,6 +83,7 @@ RuntimeEvent = (
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
+    | PlanStateChanged
     | RuntimeModelChanged
 )
 RuntimeEventType = (
@@ -82,6 +91,7 @@ RuntimeEventType = (
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
     | type[GoalStateChanged]
+    | type[PlanStateChanged]
     | type[RuntimeModelChanged]
 )
 RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
@@ -232,6 +242,27 @@ class RuntimeEventPublisher:
     def runtime_model_changed(self, model: str, model_preset: str | None) -> None:
         self.bus.publish_nowait(
             RuntimeModelChanged(model=model, model_preset=model_preset)
+        )
+
+    def plan_state_changed(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        session_key: str,
+        plan: dict[str, Any] | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.bus.publish_nowait(
+            PlanStateChanged(
+                context=self._context(
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_key=session_key,
+                    metadata=metadata,
+                ),
+                plan=plan,
+            )
         )
 
 

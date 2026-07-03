@@ -22,6 +22,7 @@ function makeClient() {
     onRuntimeModelUpdate: () => () => {},
     getRunStartedAt: () => null,
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
+    getPlanState: () => undefined,
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
       if (!handlers) {

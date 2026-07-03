@@ -7,6 +7,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
+  PlanStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
@@ -137,6 +138,8 @@ export class NanobotClient {
   private runStartedAtByChatId = new Map<string, number>();
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  /** Latest ``plan_state`` snapshot per ``chat_id`` (null means cleared/completed). */
+  private planStateByChatId = new Map<string, PlanStateWsPayload | null>();
   private pendingNewChat: PendingNewChat | null = null;
   private pendingTranscriptions = new Map<string, PendingTranscription>();
   // Frames queued while the socket is not yet OPEN
@@ -227,6 +230,11 @@ export class NanobotClient {
     return this.goalStateByChatId.get(chatId);
   }
 
+  /** Last ``plan_state`` payload for *chatId*, if any frame has arrived this connection. */
+  getPlanState(chatId: string): PlanStateWsPayload | null | undefined {
+    return this.planStateByChatId.get(chatId);
+  }
+
   private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
     if (ev.event === "turn_end") {
       if (this.runStartedAtByChatId.has(chatId)) {
@@ -253,6 +261,12 @@ export class NanobotClient {
     }
     if (ev.event === "turn_end" && ev.goal_state != null && typeof ev.goal_state === "object") {
       this.goalStateByChatId.set(chatId, ev.goal_state);
+    }
+  }
+
+  private recordPlanStateSnapshot(chatId: string, ev: InboundEvent): void {
+    if (ev.event === "plan_state") {
+      this.planStateByChatId.set(chatId, ev.plan_state);
     }
   }
 
@@ -518,6 +532,7 @@ export class NanobotClient {
     if (chatId) {
       this.recordGoalStatusForRunStrip(chatId, parsed);
       this.recordGoalStateSnapshot(chatId, parsed);
+      this.recordPlanStateSnapshot(chatId, parsed);
       this.dispatch(chatId, parsed);
     }
   }

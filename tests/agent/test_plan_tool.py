@@ -218,9 +218,27 @@ class TestDone:
         result = await tool.execute(action="done", reason="All done")
         assert "archived" in result.lower()
         assert "completed" in result.lower()
-        # Plan should be gone from active
+        # Plan should no longer be treated as active after done
         result2 = await tool.execute(action="show")
         assert "No active plan" in result2
+
+    async def test_done_marks_active_steps_as_done(self, tool, workspace):
+        set_session(tool)
+        await tool.execute(
+            action="create",
+            title="Multi-step",
+            steps=[
+                {"text": "Step 1", "status": "pending"},
+                {"text": "Step 2", "status": "pending"},
+            ],
+        )
+        await tool.execute(action="update", steps=[{"text": "Step 1", "status": "done"}])
+        await tool.execute(action="done")
+        # The plan file should have all steps marked as done
+        plan_path = tool._plan_path()
+        data = json.loads(plan_path.read_text())
+        assert all(s["status"] == "done" for s in data["steps"])
+        assert data.get("completed") is not None
 
     async def test_done_no_plan(self, tool):
         set_session(tool)

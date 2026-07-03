@@ -1058,5 +1058,14 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "plan": {
+    "executing": "Executing",
+    "completed": "Completed",
+    "steps": "Steps",
+    "stepDone": "done",
+    "stepActive": "in progress",
+    "stepPending": "pending",
+    "stepBlocked": "blocked"
   }
 }

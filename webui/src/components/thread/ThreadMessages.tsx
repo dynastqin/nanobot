@@ -70,18 +70,20 @@ interface MessageRowProps {
   role: Role;
   /** First message timestamp (epoch ms) for the unit. */
   timestamp: number | undefined;
+  showAvatar?: boolean;
+  showTimestamp?: boolean;
   className?: string;
   children: ReactNode;
 }
 
-/**
- * Wraps a message's content with the avatar on the correct side and
- * the formatted timestamp below the content.
- *
- * User  side: row-reverse, content column right-aligned
- * Assistant side: row, content column left-aligned
- */
-function MessageRow({ role, timestamp, className, children }: MessageRowProps) {
+function MessageRow({
+  role,
+  timestamp,
+  showAvatar = true,
+  showTimestamp = true,
+  className,
+  children,
+}: MessageRowProps) {
   const isUser = role === "user";
   const timeLabel = formatMessageTime(timestamp);
   return (
@@ -92,7 +94,9 @@ function MessageRow({ role, timestamp, className, children }: MessageRowProps) {
         className,
       )}
     >
-      <Avatar role={role} />
+      <div className={cn("flex w-8 shrink-0", !showAvatar && "invisible")}>
+        {showAvatar ? <Avatar role={role} /> : null}
+      </div>
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
@@ -100,7 +104,7 @@ function MessageRow({ role, timestamp, className, children }: MessageRowProps) {
         )}
       >
         {children}
-        {timeLabel ? (
+        {showTimestamp && timeLabel ? (
           <span
             className="mt-1 text-[11px] leading-none text-muted-foreground tabular-nums"
             title={timeLabel}
@@ -111,6 +115,49 @@ function MessageRow({ role, timestamp, className, children }: MessageRowProps) {
       </div>
     </div>
   );
+}
+
+interface UnitDisplayFlags {
+  showAvatar: boolean;
+  showTimestamp: boolean;
+  marginTop: string;
+}
+
+function isMessageUnit(unit: DisplayUnit): unit is Extract<DisplayUnit, { type: "message" }> {
+  return unit.type === "message";
+}
+
+function isSameRoleGroup(a: DisplayUnit, b: DisplayUnit): boolean {
+  if (a.type === "message" && b.type === "message") return a.message.role === b.message.role;
+  if (a.type === "activity" && b.type === "message") return b.message.role === "assistant";
+  if (a.type === "message" && b.type === "activity") return a.message.role === "assistant";
+  if (a.type === "activity" && b.type === "activity") return true;
+  return false;
+}
+
+function buildConsecutiveFlags(units: DisplayUnit[]): UnitDisplayFlags[] {
+  const flags: UnitDisplayFlags[] = [];
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    const prev = units[i - 1];
+    const isMsg = isMessageUnit(unit);
+    const prevIsSame = prev != null && isSameRoleGroup(unit, prev);
+
+    flags.push({
+      showAvatar: !prevIsSame,
+      showTimestamp: true,
+      marginTop: isMsg && prevIsSame ? "mt-1" : (i > 0 ? marginAfterPrevUnit(prev) : ""),
+    });
+  }
+
+  for (let i = 0; i < flags.length; i++) {
+    const next = units[i + 1];
+    if (next != null && isSameRoleGroup(units[i], next)) {
+      flags[i].showTimestamp = false;
+    }
+  }
+
+  return flags;
 }
 
 export function ThreadMessages({
@@ -132,6 +179,7 @@ export function ThreadMessages({
     [forkBoundaryMessageCount, units],
   );
   const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
+  const consecutiveFlags = useMemo(() => buildConsecutiveFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
@@ -143,11 +191,7 @@ export function ThreadMessages({
     <div className="flex w-full flex-col">
       {compaction ? <CompactionBanner info={compaction} /> : null}
       {units.map((unit, index) => {
-        const prev = units[index - 1];
-        const marginTop =
-          index > 0
-            ? marginAfterPrevUnit(prev)
-            : "";
+        const { showAvatar, showTimestamp, marginTop } = consecutiveFlags[index];
         const next = units[index + 1];
         const hasBodyBelow =
           unit.type === "activity"
@@ -168,7 +212,12 @@ export function ThreadMessages({
           <Fragment key={unitKeys[index]}>
             <div className={marginTop} data-user-prompt-id={userPromptId}>
               {unit.type === "activity" ? (
-                <MessageRow role="assistant" timestamp={unit.messages[0]?.createdAt}>
+                <MessageRow
+                  role="assistant"
+                  timestamp={unit.messages[0]?.createdAt}
+                  showAvatar={showAvatar}
+                  showTimestamp={showTimestamp}
+                >
                   <AgentActivityCluster
                     messages={unit.messages}
                     isTurnStreaming={liveActivityClusterIndices.has(index)}
@@ -181,7 +230,12 @@ export function ThreadMessages({
                   />
                 </MessageRow>
               ) : (
-                <MessageRow role={unit.message.role} timestamp={unit.message.createdAt}>
+                <MessageRow
+                  role={unit.message.role}
+                  timestamp={unit.message.createdAt}
+                  showAvatar={showAvatar}
+                  showTimestamp={showTimestamp}
+                >
                   <MessageBubble
                     message={unit.message}
                     showAssistantCopyAction={

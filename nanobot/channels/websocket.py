@@ -978,10 +978,19 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_session_updated")
                 or msg.metadata.get("_goal_status")
                 or msg.metadata.get("_goal_state_sync")
+                or msg.metadata.get("_plan_state_sync")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
+        if msg.metadata.get("_plan_state_sync"):
+            if conns:
+                plan = msg.metadata.get("plan_state")
+                await self.send_plan_state(
+                    msg.chat_id,
+                    plan if isinstance(plan, dict) else None,
+                )
+            return
         if msg.metadata.get("_goal_state_sync"):
             if conns:
                 blob = msg.metadata.get("goal_state")
@@ -1237,6 +1246,16 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_state ")
+
+    async def send_plan_state(self, chat_id: str, plan: dict[str, Any] | None) -> None:
+        """Push plan-state snapshot for *chat_id* (multi-chat isolation)."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body = {"event": "plan_state", "chat_id": chat_id, "plan_state": plan}
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" plan_state ")
 
     async def send_goal_status(
         self,

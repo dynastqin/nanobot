@@ -149,7 +149,7 @@ function HtmlPreview({ content, className }: { content: string; className?: stri
     <div className={cn("flex flex-col min-h-0", className)}>
       <iframe
         srcDoc={content}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
         title="HTML preview"
         className="w-full flex-1 min-h-0 border-0 bg-white dark:bg-zinc-900"
       />

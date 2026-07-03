@@ -1128,5 +1128,14 @@
       "usePath": "使用路径",
       "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
     }
+  },
+  "plan": {
+    "executing": "正在执行",
+    "completed": "已完成",
+    "steps": "步骤",
+    "stepDone": "已完成",
+    "stepActive": "进行中",
+    "stepPending": "待处理",
+    "stepBlocked": "已阻塞"
   }
 }

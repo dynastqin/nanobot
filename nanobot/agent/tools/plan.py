@@ -18,6 +18,11 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.bus.runtime_events import (
+    PlanStateChanged,
+    RuntimeEventBus,
+    RuntimeEventContext,
+)
 from nanobot.utils.helpers import _write_text_atomic
 
 _PLAN_PARAMETERS = tool_parameters_schema(
@@ -63,6 +68,8 @@ _PLAN_PARAMETERS = tool_parameters_schema(
 
 
 _plan_session_key: ContextVar[str] = ContextVar("plan_session_key", default="")
+_plan_channel: ContextVar[str] = ContextVar("plan_channel", default="")
+_plan_chat_id: ContextVar[str] = ContextVar("plan_chat_id", default="")
 
 _PLAN_CACHE_TTL = 5.0
 _PLAN_CACHE_MAX = 256
@@ -97,16 +104,19 @@ class PlanTool(Tool, ContextAware):
 
     _scopes = {"core", "subagent"}
 
-    def __init__(self, workspace: str):
+    def __init__(self, workspace: str, runtime_events: RuntimeEventBus | None = None):
         self._workspace = workspace
         self._plans_dir = Path(workspace) / "memory" / "plans"
+        self._runtime_events = runtime_events
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        return cls(workspace=ctx.workspace)
+        return cls(workspace=ctx.workspace, runtime_events=getattr(ctx, "runtime_events", None))
 
     def set_context(self, ctx: RequestContext) -> None:
         _plan_session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
+        _plan_channel.set(ctx.channel or "")
+        _plan_chat_id.set(ctx.chat_id or "")
 
     @property
     def name(self) -> str:
@@ -152,11 +162,33 @@ class PlanTool(Tool, ContextAware):
         plan["updated"] = _now_iso()
         _write_text_atomic(path, json.dumps(plan, indent=2, ensure_ascii=False))
         _plan_cache.pop(path.name, None)
+        self._emit_plan_state_changed(plan)
 
     def _delete_plan(self, path: Path) -> None:
         if path.exists():
             path.unlink()
         _plan_cache.pop(path.name, None)
+        self._emit_plan_state_changed(None)
+
+    def _emit_plan_state_changed(self, plan: dict | None) -> None:
+        runtime_events = self._runtime_events
+        if runtime_events is None:
+            return
+        channel = _plan_channel.get()
+        chat_id = _plan_chat_id.get()
+        if not channel or not chat_id:
+            return
+        session_key = _plan_session_key.get() or f"{channel}:{chat_id}"
+        runtime_events.publish_nowait(
+            PlanStateChanged(
+                context=RuntimeEventContext(
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_key=session_key,
+                ),
+                plan=plan,
+            )
+        )
 
     # --- Rendering ---
 
@@ -272,7 +304,7 @@ class PlanTool(Tool, ContextAware):
     def _action_show(self) -> str:
         path = self._plan_path()
         plan = self._read_plan(path)
-        if not plan:
+        if not plan or plan.get("completed"):
             return "No active plan for this session."
         return f"Current plan:\n\n{self.render_markdown(plan)}"
 
@@ -283,6 +315,10 @@ class PlanTool(Tool, ContextAware):
             return "No active plan to complete."
 
         steps = plan.get("steps", [])
+        # mark any remaining non-done steps as "done" so the UI shows full completion
+        for s in steps:
+            if s.get("status") != "done":
+                s["status"] = "done"
         done = sum(1 for s in steps if s["status"] == "done")
         total = len(steps)
         summary = f"({done}/{total} steps completed)" if total else ""
@@ -297,7 +333,7 @@ class PlanTool(Tool, ContextAware):
             json.dumps(plan, indent=2, ensure_ascii=False),
         )
 
-        self._delete_plan(path)
+        self._write_plan(path, plan)
 
         md = self.render_markdown(plan)
         footer = f"\nCompleted: {now}"
@@ -356,6 +392,9 @@ class PlanTool(Tool, ContextAware):
         try:
             plan = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
+            return None
+        if plan.get("completed"):
+            _plan_cache[cache_key] = (now, _PLAN_MISS)
             return None
         rendered = PlanTool.render_markdown(plan)
         _plan_cache[cache_key] = (now, rendered)

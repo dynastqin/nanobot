@@ -20,11 +20,14 @@ import {
 } from "@/components/CliAppMentionText";
 import {
   Activity,
+  AlertTriangle,
   ArrowUp,
   BookOpen,
   Brain,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Circle,
   CircleHelp,
   CornerDownRight,
   FileIcon,
@@ -81,6 +84,7 @@ import type {
   McpPresetInfo,
   OutboundCliAppMention,
   OutboundMcpPresetMention,
+  PlanStateWsPayload,
   SlashCommand,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -180,6 +184,8 @@ interface ThreadComposerProps {
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
+  /** Plan progress for this chat (WebSocket ``plan_state``). Always visible when set. */
+  planState?: PlanStateWsPayload | null;
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
@@ -521,6 +527,95 @@ function mcpPresetMentionPayload(preset: McpPresetInfo): OutboundMcpPresetMentio
   };
 }
 
+function PlanStepIcon({ status }: { status: string }) {
+  switch (status) {
+    case "done":
+      return <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden />;
+    case "active":
+      return <Loader2 className="size-3.5 animate-spin text-blue-500" aria-hidden />;
+    case "blocked":
+      return <AlertTriangle className="size-3.5 text-amber-500" aria-hidden />;
+    case "pending":
+    default:
+      return <Circle className="size-3.5 text-muted-foreground/50" aria-hidden />;
+  }
+}
+
+function PlanComposerStrip({
+  planState,
+}: {
+  planState?: PlanStateWsPayload | null;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (!planState) return null;
+  const { title, steps } = planState;
+  if (!steps || steps.length === 0) return null;
+
+  const doneCount = steps.filter((s) => s.status === "done").length;
+  const totalCount = steps.length;
+  const isCompleted = !!planState.completed;
+
+  return (
+    <div
+      className="composer-status-strip relative z-20 mt-2 overflow-hidden rounded-[14px] border border-black/[0.05] bg-popover/90 shadow-[0_6px_20px_rgba(15,23,42,0.06)] backdrop-blur-md dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
+      data-state="enter"
+    >
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/30"
+        onClick={() => setCollapsed((v) => !v)}
+        aria-expanded={!collapsed}
+      >
+        {isCompleted ? (
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" aria-hidden />
+        ) : (
+          <Loader2 className="size-4 shrink-0 animate-spin text-blue-500" aria-hidden />
+        )}
+        <span className="flex-1 truncate text-left text-[12px] text-muted-foreground">
+          {title}
+        </span>
+        <span className="text-[12px] font-medium text-foreground tabular-nums shrink-0">
+          {doneCount}/{totalCount}
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            collapsed && "-rotate-90",
+          )}
+        />
+      </button>
+      {!collapsed ? (
+        <div className="px-3 pb-2.5 pt-0.5">
+          <ul className="space-y-1.5">
+            {steps.map((step, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="mt-0.5 shrink-0">
+                  <PlanStepIcon status={step.status} />
+                </span>
+                <span
+                  className={cn(
+                    "text-[12.5px] leading-snug",
+                    step.status === "done"
+                      ? "text-muted-foreground line-through"
+                      : step.status === "active"
+                        ? "text-foreground font-medium"
+                        : step.status === "blocked"
+                          ? "text-foreground"
+                          : "text-muted-foreground",
+                  )}
+                >
+                  {step.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RunPulseIcon() {
   return (
     <span className="run-pulse-icon relative flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
@@ -790,6 +885,7 @@ export function ThreadComposer({
   onTranscribeAudio,
   runStartedAt = null,
   goalState,
+  planState,
   workspaceScope = null,
   workspaceDefaultScope = null,
   workspaceControls = null,
@@ -1691,6 +1787,9 @@ export function ThreadComposer({
           onChoose={chooseMentionCandidate}
         />
       ) : null}
+      <div className={cn("mx-auto w-full", isHero ? "max-w-[58rem]" : "max-w-[49.5rem]")}>
+        <PlanComposerStrip planState={planState} />
+      </div>
       <div
         className={cn(
           "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
@@ -1772,7 +1871,6 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         <div className="relative">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay

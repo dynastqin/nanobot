@@ -378,6 +378,7 @@ export function ThreadShell({
     isStreaming,
     runStartedAt,
     goalState,
+    planState,
     send,
     transcribeAudio,
     stop,
@@ -792,6 +793,7 @@ export function ThreadShell({
           onTranscribeAudio={transcribeAudio}
           runStartedAt={runStartedAt}
           goalState={goalState}
+          planState={planState}
           workspaceScope={workspaceScope}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}

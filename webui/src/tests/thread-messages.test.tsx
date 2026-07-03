@@ -53,7 +53,7 @@ describe("ThreadMessages", () => {
 
     expect(rows).toHaveLength(2);
     expect(rows[0]).not.toHaveClass("mt-2", "mt-4", "mt-5");
-    expect(rows[1]).toHaveClass("mt-4");
+    expect(rows[1]).toHaveClass("mt-1");
   });
 
   it("renders a fork boundary divider after the copied history", () => {

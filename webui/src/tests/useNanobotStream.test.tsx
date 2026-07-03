@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
-import type { InboundEvent, GoalStateWsPayload } from "@/lib/types";
+import type { InboundEvent, GoalStateWsPayload, PlanStateWsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
@@ -12,6 +12,7 @@ function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   const runStartedAtByChatId = new Map<string, number>();
   const goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  const planStateByChatId = new Map<string, PlanStateWsPayload | null>();
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
     if (ev.event === "turn_end") {
@@ -36,6 +37,12 @@ function fakeClient() {
     }
   }
 
+  function recordPlanStateSnapshot(chatId: string, ev: InboundEvent) {
+    if (ev.event === "plan_state") {
+      planStateByChatId.set(chatId, ev.plan_state);
+    }
+  }
+
   return {
     client: {
       status: "open" as const,
@@ -48,6 +55,9 @@ function fakeClient() {
       },
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
+      },
+      getPlanState(chatId: string) {
+        return planStateByChatId.get(chatId);
       },
       onChat(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
@@ -69,6 +79,7 @@ function fakeClient() {
     emit(chatId: string, ev: InboundEvent) {
       recordGoalStatusForRunStrip(chatId, ev);
       recordGoalStateSnapshot(chatId, ev);
+      recordPlanStateSnapshot(chatId, ev);
       const set = handlers.get(chatId);
       set?.forEach((h) => h(ev));
     },

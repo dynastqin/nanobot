@@ -17,6 +17,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
+  PlanStateWsPayload,
   ToolProgressEvent,
   UIImage,
   UIFileEdit,
@@ -438,6 +439,8 @@ export function useNanobotStream(
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
+  /** Latest plan state for this ``chatId`` (``plan_state`` WS events). */
+  planState: PlanStateWsPayload | null | undefined;
   send: (content: string, images?: SendImage[], options?: SendOptions) => void;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
@@ -457,6 +460,8 @@ export function useNanobotStream(
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
+  const [planState, setPlanState] = useState<PlanStateWsPayload | null | undefined>(undefined);
+  const planStateChatIdRef = useRef<string | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
@@ -696,6 +701,24 @@ export function useNanobotStream(
     setStreamError(null);
     setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
+    setPlanState((prev) => {
+      const next = chatId ? client.getPlanState(chatId) : undefined;
+      if (!next) {
+        const prevAllDone = !!(prev?.steps && prev.steps.length > 0
+          && prev.steps.every((s) => s.status === "done"));
+        if ((prev?.completed || prevAllDone) && planStateChatIdRef.current === chatId) return prev;
+        planStateChatIdRef.current = null;
+        return undefined;
+      }
+      planStateChatIdRef.current = chatId;
+      if (!next.completed
+        && next.steps
+        && next.steps.length > 0
+        && next.steps.every((s) => s.status === "done")) {
+        return { ...next, completed: "auto" };
+      }
+      return next;
+    });
     buffer.current = null;
     activeAssistantRef.current = null;
     closedAssistantStreamIdsRef.current.clear();
@@ -784,6 +807,27 @@ export function useNanobotStream(
 
       if (ev.event === "goal_state") {
         setGoalState(ev.goal_state);
+        return;
+      }
+
+      if (ev.event === "plan_state") {
+        setPlanState((prev) => {
+          if (!ev.plan_state) {
+            const prevAllDone = !!(prev?.steps && prev.steps.length > 0
+              && prev.steps.every((s) => s.status === "done"));
+            if (prev?.completed || prevAllDone) return prev;
+            planStateChatIdRef.current = null;
+            return null;
+          }
+          planStateChatIdRef.current = chatId;
+          if (!ev.plan_state.completed
+            && ev.plan_state.steps
+            && ev.plan_state.steps.length > 0
+            && ev.plan_state.steps.every((s) => s.status === "done")) {
+            return { ...ev.plan_state, completed: "auto" };
+          }
+          return ev.plan_state;
+        });
         return;
       }
 
@@ -1096,6 +1140,7 @@ export function useNanobotStream(
     isStreaming,
     runStartedAt,
     goalState,
+    planState,
     send,
     transcribeAudio,
     stop,

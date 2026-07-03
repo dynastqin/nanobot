@@ -194,6 +194,20 @@ export interface GoalStateWsPayload {
   objective?: string;
 }
 
+/** One step in a plan progress widget. */
+export interface PlanStep {
+  text: string;
+  status: "pending" | "active" | "done" | "blocked";
+}
+
+/** WebSocket snapshot for plan state (`plan_state` events; keyed by ``chat_id``). */
+export interface PlanStateWsPayload {
+  title: string;
+  goal?: string;
+  steps: PlanStep[];
+  completed?: string;
+}
+
 export interface ToolProgressEvent {
   version?: number;
   phase?: "start" | "end" | "error" | string;
@@ -849,6 +863,11 @@ export type InboundEvent =
       event: "goal_state";
       chat_id: string;
       goal_state: GoalStateWsPayload;
+    }
+  | {
+      event: "plan_state";
+      chat_id: string;
+      plan_state: PlanStateWsPayload | null;
     }
   | {
       event: "session_updated";
