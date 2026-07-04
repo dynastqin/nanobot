@@ -206,6 +206,7 @@ export interface PlanStateWsPayload {
   goal?: string;
   steps: PlanStep[];
   completed?: string;
+  created?: string;
 }
 
 export interface ToolProgressEvent {

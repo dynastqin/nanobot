@@ -400,3 +400,111 @@ class TestBuildMessages:
         user_msg = messages[-1]["content"]
         assert isinstance(user_msg, list)
         assert any(b.get("type") == "image_url" for b in user_msg)
+
+
+# ---------------------------------------------------------------------------
+# Named runtime context providers
+# ---------------------------------------------------------------------------
+
+
+def test_named_provider_registration_and_skip(tmp_path):
+    """Providers can be registered with a name and skipped by name."""
+    from nanobot.agent.context import ContextBuilder
+
+    cb = ContextBuilder(workspace=tmp_path)
+
+    def provider_a(session_key):
+        return "Content A"
+
+    def provider_b(session_key):
+        return "Content B"
+
+    cb.register_runtime_context_provider(provider_a, name="a")
+    cb.register_runtime_context_provider(provider_b, name="b")
+
+    runtime_ctx = f"before\n{cb._RUNTIME_CONTEXT_END}"
+
+    # Without skip: both injected
+    result = cb.inject_runtime_providers(runtime_ctx, "sess1")
+    assert "Content A" in result
+    assert "Content B" in result
+
+    # With skip: only B injected
+    result_skip = cb.inject_runtime_providers(runtime_ctx, "sess1", skip_names={"a"})
+    assert "Content A" not in result_skip
+    assert "Content B" in result_skip
+
+
+def test_unnamed_provider_backward_compat(tmp_path):
+    """Providers registered without a name cannot be skipped by name."""
+    from nanobot.agent.context import ContextBuilder
+
+    cb = ContextBuilder(workspace=tmp_path)
+
+    def provider(session_key):
+        return "Anonymous"
+
+    cb.register_runtime_context_provider(provider)
+
+    runtime_ctx = f"before\n{cb._RUNTIME_CONTEXT_END}"
+
+    result = cb.inject_runtime_providers(runtime_ctx, "sess1", skip_names={"anonymous"})
+    assert "Anonymous" in result  # not skipped — no name match
+
+
+def test_build_messages_unifies_goal_and_plan(tmp_path):
+    """When both goal and plan are active, they are merged into one Runtime Context block."""
+    import json
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.agent.tools.plan import _safe_filename
+    from nanobot.session.goal_state import GOAL_STATE_KEY
+
+    cb = ContextBuilder(workspace=tmp_path)
+
+    # Create a plan on disk
+    plans_dir = tmp_path / "memory" / "plans"
+    plans_dir.mkdir(parents=True)
+    plan = {
+        "title": "Refactor auth",
+        "goal": "Refactor auth module",
+        "steps": [
+            {"text": "Analyze code", "status": "done"},
+            {"text": "Implement OAuth2", "status": "active"},
+            {"text": "Write tests", "status": "pending"},
+        ],
+        "notes": [{"ts": "2026-07-03T10:30:00Z", "text": "Need refresh token logic"}],
+        "created": "2026-07-03T10:00:00Z",
+    }
+    plan_path = plans_dir / f"{_safe_filename('ws:c1')}.json"
+    plan_path.write_text(json.dumps(plan))
+
+    # Register plan provider
+    from nanobot.agent.tools.plan import PlanTool
+    pt = PlanTool(workspace=str(tmp_path))
+    cb.register_runtime_context_provider(pt.runtime_context_provider(), name="plan")
+
+    # Build messages with active goal
+    session_metadata = {
+        GOAL_STATE_KEY: {
+            "status": "active",
+            "objective": "Refactor auth module",
+            "ui_summary": "auth refactor",
+        },
+    }
+    messages = cb.build_messages(
+        history=[],
+        current_message="continue working",
+        session_metadata=session_metadata,
+        session_key="ws:c1",
+    )
+
+    # Find the user message containing runtime context
+    user_msg = [m for m in messages if m["role"] == "user"][-1]
+    content = user_msg["content"] if isinstance(user_msg["content"], str) else str(user_msg["content"])
+
+    # Unified: goal and plan in one block, no separate "# Active Plan" section
+    assert "Goal (active):" in content
+    assert "Plan progress" in content
+    assert "1/3 steps done" in content
+    # Should NOT have a separate "# Active Plan" header (that's the old format)
+    assert "# Active Plan" not in content

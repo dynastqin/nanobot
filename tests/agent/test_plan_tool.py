@@ -419,3 +419,34 @@ class TestStatusNormalization:
         assert "- [>] B" in result
         assert "- [x] C" in result
         assert "- [!] D" in result
+
+
+class TestLoadPlanDict:
+    """Tests for PlanTool.load_plan_dict static method."""
+
+    async def test_load_plan_dict_returns_none_when_no_plan(self, workspace):
+        result = PlanTool.load_plan_dict(workspace, "nonexistent:session")
+        assert result is None
+
+    async def test_load_plan_dict_returns_plan_dict(self, tool, workspace):
+        set_session(tool, "test:session1")
+        await tool.execute(
+            action="create",
+            title="My Plan",
+            goal="Fix things",
+            steps=[{"text": "Step 1", "status": "pending"}],
+        )
+        result = PlanTool.load_plan_dict(workspace, "test:session1")
+        assert result is not None
+        assert result["title"] == "My Plan"
+        assert result["goal"] == "Fix things"
+        assert len(result["steps"]) == 1
+        assert result["steps"][0]["text"] == "Step 1"
+
+    async def test_load_plan_dict_returns_none_for_completed_plan(self, tool, workspace):
+        set_session(tool, "test:session2")
+        await tool.execute(action="create", title="Plan to complete")
+        await tool.execute(action="done")
+        result = PlanTool.load_plan_dict(workspace, "test:session2")
+        assert result is None
+

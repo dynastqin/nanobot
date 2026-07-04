@@ -22,6 +22,19 @@ Before the first `long_task` call, you do **not** need to:
 
 Those belong to the execution phase after the marker is set.
 
+## Structured tracking with plan
+
+After calling `long_task`, create a structured plan before starting execution:
+
+1. **Analyze first** — Use read/search tools to understand the problem scope.
+2. **Create plan** — Call `plan(action="create", title=..., goal=..., steps=[...])` with concrete, verifiable steps.
+3. **Track progress** — After completing each step, call `plan(action="update", steps=[{index, status="done"}])`.
+4. **Adapt** — If new steps emerge or existing ones change, update the plan.
+
+The plan appears in your Runtime Context every turn, so you always see what's done and what's next.
+
+Skip plan creation only when the goal is trivially simple (< 3 steps) or when the user explicitly asks you not to plan.
+
 ## Tools
 
 - **`long_task`** — Register **one** sustained objective per thread. Call it promptly once the user has asked for a sustained task. The `goal` should follow the idempotent-goal rules below, but it should be produced quickly from the user's request—not after a long hidden planning pass.

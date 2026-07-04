@@ -5,10 +5,12 @@ import {
   Circle,
   AlertTriangle,
   ChevronDown,
+  Clock,
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PlanStateWsPayload } from "@/lib/types";
+import { useElapsed } from "@/hooks/useElapsed";
 
 interface PlanProgressCardProps {
   planState: PlanStateWsPayload | null | undefined;
@@ -22,6 +24,10 @@ export const PlanProgressCard: FC<PlanProgressCardProps> = ({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
 
+  const created = planState?.created;
+  const isCompleted = !!planState?.completed;
+  const elapsed = useElapsed(created, isCompleted);
+
   if (!planState) return null;
 
   const { title, steps } = planState;
@@ -29,7 +35,6 @@ export const PlanProgressCard: FC<PlanProgressCardProps> = ({
 
   const doneCount = steps.filter((s) => s.status === "done").length;
   const totalCount = steps.length;
-  const isCompleted = !!planState.completed;
 
   const statusLabel = isCompleted
     ? t("plan.completed")
@@ -50,6 +55,12 @@ export const PlanProgressCard: FC<PlanProgressCardProps> = ({
         <span className="text-[12px] font-medium text-muted-foreground shrink-0">
           {statusLabel}
         </span>
+        {elapsed ? (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground/70 tabular-nums shrink-0">
+            <Clock className="size-3" />
+            {elapsed}
+          </span>
+        ) : null}
         <span className="text-[12px] font-medium text-foreground tabular-nums shrink-0">
           {doneCount} / {totalCount}
         </span>

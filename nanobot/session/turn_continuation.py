@@ -119,7 +119,11 @@ async def maybe_continue_turn(ctx: Any) -> bool:
         ctx.msg.metadata,
         run_started_at=getattr(ctx, "visible_run_started_at", None),
     )
-    content = _goal_continuation_prompt(ctx.session.metadata)
+    content = _goal_continuation_prompt(
+        ctx.session.metadata,
+        workspace=getattr(ctx, "workspace", None),
+        session_key=ctx.session_key,
+    )
     messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     _increment_goal_continuation_round(ctx.session.metadata)
 
@@ -235,24 +239,82 @@ def _internal_continuation_metadata(
     return metadata
 
 
-def _goal_continuation_prompt(metadata: Mapping[str, Any] | None) -> str:
+def _goal_continuation_prompt(
+    metadata: Mapping[str, Any] | None,
+    *,
+    workspace: str | None = None,
+    session_key: str | None = None,
+) -> str:
     lines = goal_state_runtime_lines(metadata)
+    plan_section = ""
+
+    if workspace and session_key:
+        plan_section = _plan_progress_section(workspace, session_key)
+
     if lines:
         goal = "\n".join(lines)
-        return (
+        parts = [
             "Continue the active sustained goal after the previous turn reached "
-            "its tool-call budget.\n\n"
-            f"{goal}\n\n"
+            "its tool-call budget.",
+            "",
+            goal,
+        ]
+        if plan_section:
+            parts.append("")
+            parts.append(plan_section)
+        parts.append("")
+        parts.append(
             "Continue from the saved context. Do not mention the continuation "
             "boundary to the user. Use tools as needed, and call complete_goal "
             "when the objective is truly finished."
         )
-    return (
+        return "\n".join(parts)
+
+    fallback_parts = [
         "Continue the active sustained goal after the previous turn reached "
-        "its tool-call budget. Continue from the saved context. Do not mention "
-        "the continuation boundary to the user. Use tools as needed, and call "
-        "complete_goal when the objective is truly finished."
+        "its tool-call budget.",
+    ]
+    if plan_section:
+        fallback_parts.append("")
+        fallback_parts.append(plan_section)
+    fallback_parts.append("")
+    fallback_parts.append(
+        "Continue from the saved context. Do not mention the continuation "
+        "boundary to the user. Use tools as needed, and call complete_goal "
+        "when the objective is truly finished."
     )
+    return "\n".join(fallback_parts)
+
+
+def _plan_progress_section(workspace: str, session_key: str) -> str:
+    """Build a plan progress section for the continuation prompt, or empty string."""
+    import re
+
+    from nanobot.agent.tools.plan import PlanTool
+
+    rendered = PlanTool.load_active_plan(workspace, session_key)
+    if not rendered:
+        return ""
+
+    # Match only step markers: - [x], - [>], - [ ], - [!]
+    _step_re = re.compile(r"^- \[[x> !]\] ")
+
+    done = len([line for line in rendered.splitlines() if _step_re.match(line) and "- [x]" in line])
+    active = len([line for line in rendered.splitlines() if _step_re.match(line) and "- [>]" in line])
+    blocked = len([line for line in rendered.splitlines() if _step_re.match(line) and "- [!]" in line])
+    pending = len([line for line in rendered.splitlines() if _step_re.match(line) and "- [ ]" in line])
+    total = done + active + blocked + pending
+
+    if total == 0:
+        return ""
+
+    header = f"Plan progress ({done}/{total} steps done):"
+    # Extract just the step lines from the rendered markdown
+    step_lines = [
+        line for line in rendered.splitlines()
+        if _step_re.match(line)
+    ]
+    return "\n".join([header, *step_lines])
 
 
 def _strip_terminal_assistant(

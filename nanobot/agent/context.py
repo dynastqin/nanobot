@@ -63,17 +63,26 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
-        self._runtime_context_providers: list[Callable[[str | None], str | None]] = []
+        self._runtime_context_providers: list[tuple[str | None, Callable[[str | None], str | None]]] = []
 
-    def register_runtime_context_provider(self, provider: Callable[[str | None], str | None]) -> None:
-        """Register a callable(session_key -> str|None) to inject extra content into runtime context."""
-        self._runtime_context_providers.append(provider)
+    def register_runtime_context_provider(
+        self, provider: Callable[[str | None], str | None], *, name: str | None = None,
+    ) -> None:
+        """Register a callable(session_key -> str|None) to inject extra content into runtime context.
+
+        Args:
+            provider: Callable that receives session_key and returns content or None.
+            name: Optional name for selective skipping via inject_runtime_providers().
+        """
+        self._runtime_context_providers.append((name, provider))
 
     def inject_runtime_providers(
-        self, runtime_ctx: str, session_key: str | None,
+        self, runtime_ctx: str, session_key: str | None, *, skip_names: set[str] | None = None,
     ) -> str:
         """Inject registered runtime context provider content before the end marker."""
-        for provider in self._runtime_context_providers:
+        for provider_name, provider in self._runtime_context_providers:
+            if skip_names and provider_name and provider_name in skip_names:
+                continue
             extra = provider(session_key)
             if extra:
                 idx = runtime_ctx.rfind(self._RUNTIME_CONTEXT_END)
@@ -208,6 +217,49 @@ class ContextBuilder:
             return content.strip() == tpl.strip()
         return False
 
+    @staticmethod
+    def _load_plan_for_context(workspace: str, session_key: str) -> str | None:
+        """Load the active plan rendered markdown for context injection."""
+        from nanobot.agent.tools.plan import PlanTool
+        return PlanTool.load_active_plan(workspace, session_key)
+
+    @staticmethod
+    def _build_unified_goal_plan(goal_lines: list[str], plan_text: str) -> str:
+        """Merge goal runtime lines and plan text into a unified block."""
+        import re
+        parts = list(goal_lines)
+
+        # Parse plan text to extract steps and notes
+        plan_lines = plan_text.splitlines()
+        # Match only step markers: - [x], - [>], - [ ], - [!]
+        _step_re = re.compile(r"^- \[[x> !]\] ")
+        step_lines = [line for line in plan_lines if _step_re.match(line)]
+        done = sum(1 for line in step_lines if "- [x]" in line)
+        total = len(step_lines)
+
+        if total > 0:
+            parts.append("")
+            parts.append(f"Plan progress ({done}/{total} steps done):")
+            parts.extend(step_lines)
+
+        # Extract notes section if present
+        notes_start = None
+        for i, line in enumerate(plan_lines):
+            if line.startswith("## Notes"):
+                notes_start = i + 1
+                break
+        if notes_start is not None:
+            note_lines = [
+                line for line in plan_lines[notes_start:]
+                if line.startswith("- [") and not _step_re.match(line)
+            ]
+            if note_lines:
+                parts.append("")
+                parts.append("Notes:")
+                parts.extend(note_lines)
+
+        return "\n".join(parts)
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -231,9 +283,22 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
-        extra = [
-            *goal_state_runtime_lines(session_metadata),
-        ]
+        goal_lines = goal_state_runtime_lines(session_metadata)
+        plan_text = None
+        if session_key:
+            plan_text = self._load_plan_for_context(str(root), session_key)
+
+        skip_provider_names: set[str] = set()
+        extra: list[str] = []
+
+        if goal_lines and plan_text:
+            # Unified goal+plan block
+            extra.append(self._build_unified_goal_plan(goal_lines, plan_text))
+            skip_provider_names.add("plan")
+        else:
+            extra.extend(goal_lines)
+            # Plan provider will inject normally (no skip needed)
+
         if runtime_state is not None and inbound_message is not None:
             extra.extend(runtime_lines(runtime_state, inbound_message, root, skip=skip_runtime_lines))
         if current_runtime_lines:
@@ -245,7 +310,9 @@ class ContextBuilder:
             sender_id=sender_id,
             supplemental_lines=extra or None,
         )
-        runtime_ctx = self.inject_runtime_providers(runtime_ctx, session_key)
+        runtime_ctx = self.inject_runtime_providers(
+            runtime_ctx, session_key, skip_names=skip_provider_names or None,
+        )
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message

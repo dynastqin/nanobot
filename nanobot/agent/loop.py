@@ -510,7 +510,9 @@ class AgentLoop:
         # Register plan tool's runtime context provider
         plan_tool = self.tools.get("plan")
         if plan_tool and isinstance(plan_tool, PlanTool):
-            self.context.register_runtime_context_provider(plan_tool.runtime_context_provider())
+            self.context.register_runtime_context_provider(
+                plan_tool.runtime_context_provider(), name="plan",
+            )
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 

@@ -366,6 +366,23 @@ class WebSocketChannel(BaseChannel):
             return
         await self.send_goal_state(chat_id, blob)
 
+    async def _maybe_push_active_plan_state(self, chat_id: str) -> None:
+        """Replay an active plan from workspace storage after *chat_id* is subscribed.
+
+        Plan state lives on disk (``memory/plans/*.json``) and survives gateway restarts.
+        Pushing here makes refresh + reconnect restore the plan progress card without
+        waiting for the next plan tool call.
+        """
+        from nanobot.agent.tools.plan import PlanTool
+
+        session_key = f"websocket:{chat_id}"
+        scope = self._workspaces.scope_for_session_key(session_key)
+        workspace = str(scope.project_path)
+        plan = PlanTool.load_plan_dict(workspace, session_key)
+        if plan is None:
+            return
+        await self.send_plan_state(chat_id, plan)
+
     async def _maybe_push_turn_run_wall_clock(self, chat_id: str) -> None:
         """Replay ``goal_status: running`` when a turn is still active (same-process refresh)."""
         t0 = websocket_turn_wall_started_at(chat_id)
@@ -374,9 +391,10 @@ class WebSocketChannel(BaseChannel):
         await self.send_goal_status(chat_id, "running", started_at=t0)
 
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
-        """Replay goal/run strip state after subscribe (same-process refresh)."""
+        """Replay goal/run/plan strip state after subscribe (same-process refresh)."""
         await self._maybe_push_active_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
+        await self._maybe_push_active_plan_state(chat_id)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""

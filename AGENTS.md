@@ -4,6 +4,10 @@ This file provides guidance to AI coding agents working with this repository.
 
 nanobot is a lightweight, open-source AI agent framework written in Python with a React/TypeScript WebUI. It centers around a small agent loop that receives messages from chat channels, invokes an LLM provider, executes tools, and manages session memory.
 
+## Iron Rules
+
+- **NEVER run web tests / dev server / build from the project root. Always `cd webui` first.** The root has no `package.json`; running `bun run test` or `vitest` from root creates a stale `node_modules/.vite/` cache at the project root. Correct: `cd webui && bun run test`.
+
 ## Development Commands
 
 ```bash

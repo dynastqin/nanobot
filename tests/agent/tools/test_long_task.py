@@ -20,9 +20,10 @@ from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
-def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:
-    lt = LongTaskTool(sessions=sm)
-    cg = CompleteGoalTool(sessions=sm)
+def _tools(sm: SessionManager, workspace: str | None = None) -> tuple[LongTaskTool, CompleteGoalTool]:
+    ws = workspace or str(sm.workspace)
+    lt = LongTaskTool(sessions=sm, workspace=ws)
+    cg = CompleteGoalTool(sessions=sm, workspace=ws)
     rc = RequestContext(
         channel="websocket",
         chat_id="c1",
@@ -37,7 +38,7 @@ def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:
 @pytest.mark.asyncio
 async def test_long_task_records_goal_metadata(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, _cg = _tools(sm)
+    lt, _cg = _tools(sm, workspace=str(tmp_path))
 
     out = await lt.execute(goal="Do the thing", ui_summary="thing")
     assert "Goal recorded" in out
@@ -53,7 +54,7 @@ async def test_long_task_records_goal_metadata(tmp_path):
 @pytest.mark.asyncio
 async def test_long_task_rejects_second_active_goal(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, _cg = _tools(sm)
+    lt, _cg = _tools(sm, workspace=str(tmp_path))
 
     await lt.execute(goal="First")
     out = await lt.execute(goal="Second")
@@ -63,7 +64,7 @@ async def test_long_task_rejects_second_active_goal(tmp_path):
 @pytest.mark.asyncio
 async def test_complete_goal_closes_active_goal(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, cg = _tools(sm)
+    lt, cg = _tools(sm, workspace=str(tmp_path))
 
     await lt.execute(goal="X")
     out = await cg.execute(recap="Done.")
@@ -186,7 +187,7 @@ async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
 @pytest.mark.asyncio
 async def test_complete_goal_without_active_is_noop_message(tmp_path):
     sm = SessionManager(tmp_path)
-    _lt, cg = _tools(sm)
+    _lt, cg = _tools(sm, workspace=str(tmp_path))
 
     out = await cg.execute(recap="n/a")
     assert "No active" in out
@@ -195,7 +196,7 @@ async def test_complete_goal_without_active_is_noop_message(tmp_path):
 @pytest.mark.asyncio
 async def test_long_task_skips_ws_publish_without_bus(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, _cg = _tools(sm)
+    lt, _cg = _tools(sm, workspace=str(tmp_path))
     out = await lt.execute(goal="Solo", ui_summary="s")
     assert "Goal recorded" in out
 
@@ -211,3 +212,73 @@ async def test_long_task_and_complete_goal_registered(tmp_path):
     cg = loop.tools.get("complete_goal")
     assert lt is not None and lt.name == "long_task"
     assert cg is not None and cg.name == "complete_goal"
+
+
+@pytest.mark.asyncio
+async def test_complete_goal_archives_active_plan(tmp_path):
+    """complete_goal auto-archives an active plan for the same session."""
+    import json
+    from nanobot.agent.tools.plan import _safe_filename
+
+    sm = SessionManager(tmp_path)
+    workspace = tmp_path
+    lt = LongTaskTool(sessions=sm, workspace=str(workspace))
+    cg = CompleteGoalTool(sessions=sm, workspace=str(workspace))
+    rc = RequestContext(
+        channel="websocket", chat_id="c1",
+        session_key="websocket:c1", metadata={},
+    )
+    lt.set_context(rc)
+    cg.set_context(rc)
+
+    # Set up a goal and a plan
+    await lt.execute(goal="Test goal")
+
+    plans_dir = workspace / "memory" / "plans"
+    plans_dir.mkdir(parents=True)
+    plan = {
+        "title": "Test plan",
+        "goal": "Test goal",
+        "steps": [
+            {"text": "Step 1", "status": "done"},
+            {"text": "Step 2", "status": "active"},
+            {"text": "Step 3", "status": "pending"},
+        ],
+        "notes": [],
+        "created": "2026-07-03T10:00:00Z",
+    }
+    plan_path = plans_dir / f"{_safe_filename('websocket:c1')}.json"
+    plan_path.write_text(json.dumps(plan))
+
+    # Complete the goal
+    out = await cg.execute(recap="Done.")
+    assert "marked complete" in out
+
+    # Plan should be archived
+    archived_plan = json.loads(plan_path.read_text())
+    assert archived_plan.get("completed") is not None
+    for step in archived_plan["steps"]:
+        assert step["status"] == "done"
+
+    # Archive copy should exist
+    archive_path = plans_dir / "archive" / plan_path.name
+    assert archive_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_complete_goal_no_plan_still_works(tmp_path):
+    """complete_goal works normally when no plan exists."""
+    sm = SessionManager(tmp_path)
+    workspace = tmp_path
+    lt = LongTaskTool(sessions=sm, workspace=str(workspace))
+    cg = CompleteGoalTool(sessions=sm, workspace=str(workspace))
+    rc = RequestContext(
+        channel="websocket", chat_id="c1",
+        session_key="websocket:c1", metadata={},
+    )
+    lt.set_context(rc)
+    cg.set_context(rc)
+
+    await lt.execute(goal="Simple goal")
+    out = await cg.execute(recap="Done.")
+    assert "marked complete" in out

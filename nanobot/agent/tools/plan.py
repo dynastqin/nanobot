@@ -386,16 +386,25 @@ class PlanTool(Tool, ContextAware):
         if cached and (now - cached[0]) < _PLAN_CACHE_TTL:
             return cached[1] if cached[1] is not _PLAN_MISS else None
         PlanTool._evict_cache(now)
-        if not path.exists():
+        plan = PlanTool.load_plan_dict(workspace, session_key)
+        if plan is None:
             _plan_cache[cache_key] = (now, _PLAN_MISS)
+            return None
+        rendered = PlanTool.render_markdown(plan)
+        _plan_cache[cache_key] = (now, rendered)
+        return rendered
+
+    @staticmethod
+    def load_plan_dict(workspace: str, session_key: str) -> dict | None:
+        """Load the active plan as a dict. Returns None if no active plan or plan is completed."""
+        plans_dir = Path(workspace) / "memory" / "plans"
+        path = plans_dir / f"{_safe_filename(session_key)}.json"
+        if not path.exists():
             return None
         try:
             plan = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         if plan.get("completed"):
-            _plan_cache[cache_key] = (now, _PLAN_MISS)
             return None
-        rendered = PlanTool.render_markdown(plan)
-        _plan_cache[cache_key] = (now, rendered)
-        return rendered
+        return plan

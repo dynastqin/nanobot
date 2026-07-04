@@ -16,14 +16,21 @@ There is **no** sub-agent orchestrator and **no** special WebSocket ``agent_ui``
 
 from __future__ import annotations
 
+import json
 from contextvars import ContextVar
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
-from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
+from nanobot.bus.runtime_events import (
+    GoalStateChanged,
+    PlanStateChanged,
+    RuntimeEventBus,
+    RuntimeEventContext,
+)
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     discard_legacy_goal_state_key,
@@ -115,8 +122,11 @@ class LongTaskTool(Tool, _GoalToolsMixin):
         self,
         sessions: Any,
         runtime_events: RuntimeEventBus | None = None,
+        *,
+        workspace: str = "",
     ) -> None:
         _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        self._workspace = workspace
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -125,6 +135,7 @@ class LongTaskTool(Tool, _GoalToolsMixin):
         return cls(
             sessions=sess,
             runtime_events=getattr(ctx, "runtime_events", None),
+            workspace=getattr(ctx, "workspace", ""),
         )
 
     @classmethod
@@ -197,8 +208,11 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         self,
         sessions: Any,
         runtime_events: RuntimeEventBus | None = None,
+        *,
+        workspace: str = "",
     ) -> None:
         _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        self._workspace = workspace
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -207,6 +221,7 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         return cls(
             sessions=sess,
             runtime_events=getattr(ctx, "runtime_events", None),
+            workspace=getattr(ctx, "workspace", ""),
         )
 
     @classmethod
@@ -245,7 +260,88 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         discard_legacy_goal_state_key(sess.metadata)
         self._sessions.save(sess)
         await self._publish_goal_state_changed(sess.metadata)
+
+        # Bridge: auto-archive active plan for this session
+        archive_info = self._archive_plan_if_active()
+
         tail = (recap or "").strip()
+        result = f"Goal marked complete ({ended})."
         if tail:
-            return f"Goal marked complete ({ended}). Recap:\n{tail}"
-        return f"Goal marked complete ({ended})."
+            result += f" Recap:\n{tail}"
+        if archive_info:
+            result += f"\n\n{archive_info}"
+        return result
+
+    def _archive_plan_if_active(self) -> str | None:
+        """Archive an active plan for this session. Returns info string or None."""
+        if not self._workspace:
+            return None
+        rc = self._request_ctx.get()
+        if rc is None:
+            return None
+        session_key = rc.session_key or f"{rc.channel}:{rc.chat_id}"
+
+        from nanobot.agent.tools.plan import _safe_filename
+        from nanobot.utils.helpers import _write_text_atomic
+
+        plans_dir = Path(self._workspace) / "memory" / "plans"
+        plan_path = plans_dir / f"{_safe_filename(session_key)}.json"
+        if not plan_path.exists():
+            return None
+
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        if plan.get("completed"):
+            return None
+
+        # Mark all remaining steps as done
+        for step in plan.get("steps", []):
+            if step.get("status") != "done":
+                step["status"] = "done"
+
+        now = _iso_now()
+        plan["completed"] = now
+
+        # Write archive copy
+        archive_dir = plans_dir / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        _write_text_atomic(
+            archive_dir / plan_path.name,
+            json.dumps(plan, indent=2, ensure_ascii=False),
+        )
+        # Update in place
+        _write_text_atomic(
+            plan_path,
+            json.dumps(plan, indent=2, ensure_ascii=False),
+        )
+
+        # Emit PlanStateChanged(plan=None) to clear WebUI
+        self._emit_plan_cleared()
+
+        done = sum(1 for s in plan.get("steps", []) if s.get("status") == "done")
+        total = len(plan.get("steps", []))
+        return f"Plan archived ({done}/{total} steps completed)."
+
+    def _emit_plan_cleared(self) -> None:
+        """Emit PlanStateChanged(plan=None) to update WebUI."""
+        runtime_events = self._runtime_events
+        rc = self._request_ctx.get()
+        if runtime_events is None or rc is None:
+            return
+        cid = (rc.chat_id or "").strip()
+        if not cid:
+            return
+        session_key = rc.session_key or f"{rc.channel}:{cid}"
+        runtime_events.publish_nowait(
+            PlanStateChanged(
+                context=RuntimeEventContext(
+                    channel=rc.channel,
+                    chat_id=cid,
+                    session_key=session_key,
+                ),
+                plan=None,
+            )
+        )

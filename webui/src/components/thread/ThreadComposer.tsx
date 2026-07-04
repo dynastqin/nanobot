@@ -29,6 +29,7 @@ import {
   ChevronUp,
   Circle,
   CircleHelp,
+  Clock,
   CornerDownRight,
   FileIcon,
   GripVertical,
@@ -78,6 +79,7 @@ import {
 } from "@/hooks/useDocuments";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
+import { useElapsed } from "@/hooks/useElapsed";
 import type {
   CliAppInfo,
   GoalStateWsPayload,
@@ -548,17 +550,20 @@ function PlanComposerStrip({
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
+  const created = planState?.created;
+  const isCompleted = !!planState?.completed;
+  const elapsed = useElapsed(created, isCompleted);
+
   if (!planState) return null;
   const { title, steps } = planState;
   if (!steps || steps.length === 0) return null;
 
   const doneCount = steps.filter((s) => s.status === "done").length;
   const totalCount = steps.length;
-  const isCompleted = !!planState.completed;
 
   return (
     <div
-      className="composer-status-strip relative z-20 mt-2 overflow-hidden rounded-[14px] border border-black/[0.05] bg-popover/90 shadow-[0_6px_20px_rgba(15,23,42,0.06)] backdrop-blur-md dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
+      className="composer-status-strip relative z-20 overflow-hidden rounded-t-[14px] rounded-b-none border border-b-0 border-black/[0.05] bg-popover/90 shadow-[0_-2px_12px_rgba(15,23,42,0.06)] backdrop-blur-md dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.22)]"
       data-state="enter"
     >
       <button
@@ -575,6 +580,12 @@ function PlanComposerStrip({
         <span className="flex-1 truncate text-left text-[12px] text-muted-foreground">
           {title}
         </span>
+        {elapsed ? (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground/70 tabular-nums shrink-0">
+            <Clock className="size-3" />
+            {elapsed}
+          </span>
+        ) : null}
         <span className="text-[12px] font-medium text-foreground tabular-nums shrink-0">
           {doneCount}/{totalCount}
         </span>
@@ -916,6 +927,7 @@ export function ThreadComposer({
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
   const isHero = variant === "hero";
+  const hasActivePlan = !!(planState?.steps && planState.steps.length > 0);
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const queuedPromptStorageKey = useMemo(
     () => queuedPromptsStorageKey(pendingQueueKey),
@@ -1795,8 +1807,14 @@ export function ThreadComposer({
           "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           "after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:border after:border-blue-300/75 after:opacity-0 after:transition-opacity after:duration-200 focus-within:after:opacity-100 dark:after:border-blue-400/55",
           isHero
-            ? "max-w-[58rem] rounded-[28px] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
-            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
+            ? cn(
+                "max-w-[58rem] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]",
+                hasActivePlan ? "rounded-t-none rounded-b-[28px]" : "rounded-[28px]",
+              )
+            : cn(
+                "max-w-[49.5rem] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
+                hasActivePlan ? "rounded-t-none rounded-b-[22px]" : "rounded-[22px]",
+              ),
           "focus-within:border-blue-300/75 dark:focus-within:border-blue-400/55",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",

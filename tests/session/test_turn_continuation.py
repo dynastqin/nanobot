@@ -165,3 +165,65 @@ def test_save_skip_unchanged_for_standalone_current_message():
         history_count=1,
         user_persisted_early=False,
     ) == 2
+
+
+def test_goal_continuation_prompt_includes_plan_progress(tmp_path):
+    """When an active plan exists, the continuation prompt includes step progress."""
+    from nanobot.agent.tools.plan import _safe_filename
+    from nanobot.session.turn_continuation import _goal_continuation_prompt
+
+    workspace = tmp_path
+    plans_dir = workspace / "memory" / "plans"
+    plans_dir.mkdir(parents=True)
+
+    # Create a plan file matching the session key
+    import json
+    plan = {
+        "title": "Refactor auth",
+        "goal": "Refactor auth module",
+        "steps": [
+            {"text": "Analyze existing code", "status": "done"},
+            {"text": "Implement OAuth2", "status": "active"},
+            {"text": "Write tests", "status": "pending"},
+        ],
+        "notes": [],
+        "created": "2026-07-03T10:00:00Z",
+        "updated": "2026-07-03T10:30:00Z",
+    }
+    plan_path = plans_dir / f"{_safe_filename('feishu:c1')}.json"
+    plan_path.write_text(json.dumps(plan))
+
+    metadata = {
+        GOAL_STATE_KEY: {
+            "status": "active",
+            "objective": "Refactor auth module",
+            "ui_summary": "auth refactor",
+        },
+    }
+
+    prompt = _goal_continuation_prompt(
+        metadata, workspace=str(workspace), session_key="feishu:c1",
+    )
+    assert "Plan progress" in prompt
+    assert "1/3" in prompt
+    assert "Analyze existing code" in prompt
+    assert "Implement OAuth2" in prompt
+
+
+def test_goal_continuation_prompt_without_plan(tmp_path):
+    """Without a plan, the continuation prompt is unchanged (backward compat)."""
+    from nanobot.session.turn_continuation import _goal_continuation_prompt
+
+    metadata = {
+        GOAL_STATE_KEY: {
+            "status": "active",
+            "objective": "Do something",
+        },
+    }
+
+    prompt = _goal_continuation_prompt(
+        metadata, workspace=str(tmp_path), session_key="feishu:c1",
+    )
+    assert "Continue the active sustained goal" in prompt
+    assert "Plan progress" not in prompt
+    assert "Do something" in prompt
