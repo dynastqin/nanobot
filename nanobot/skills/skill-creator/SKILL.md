@@ -43,6 +43,16 @@ Match the level of specificity to the task's fragility and variability:
 
 Think of the agent as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
 
+### Use Framework-Agnostic Path References
+
+Skills should work across agent frameworks (nanobot, Claude Code, Codex, etc.). Never hardcode framework-specific paths. Instead, use natural language that the agent resolves from its system prompt:
+
+- **Output files**: Say "save to the outputs directory" — the agent framework declares this location in its system prompt (e.g., `Outputs directory: /path/to/outputs/`). Never write `{{ AGENT_OUTPUTS_DIR }}` or hardcode paths like `~/.nanobot/workspace/outputs_xxx/`.
+- **Workspace root**: Say "the workspace root" — the framework declares this too.
+- **Temp files**: Say "a temporary directory" — the agent knows how to resolve this.
+
+When a skill needs to reference a location, ask: "Would this wording work in any agent framework?" If not, make it generic.
+
 ### Anatomy of a Skill
 
 Every skill consists of a required SKILL.md file and optional bundled resources:

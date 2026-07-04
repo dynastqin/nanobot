@@ -1,4 +1,4 @@
-import { Children, isValidElement, useMemo, type ReactNode } from "react";
+import { Children, isValidElement, useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -145,14 +145,25 @@ function MarkdownPreview({ content, className }: { content: string; className?: 
 }
 
 function HtmlPreview({ content, className }: { content: string; className?: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const blob = new Blob([content], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [content]);
+
   return (
     <div className={cn("flex flex-col min-h-0", className)}>
-      <iframe
-        srcDoc={content}
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        title="HTML preview"
-        className="w-full flex-1 min-h-0 border-0 bg-white dark:bg-zinc-900"
-      />
+      {blobUrl ? (
+        <iframe
+          src={blobUrl}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          title="HTML preview"
+          className="w-full flex-1 min-h-0 border-0 bg-white dark:bg-zinc-900"
+        />
+      ) : null}
     </div>
   );
 }
