@@ -197,6 +197,7 @@ function SkillDetailSheet({
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [sheetWidth, setSheetWidth] = useState(544);
   const [entered, setEntered] = useState(false);
+  const [activeTab, setActiveTab] = useState<"info" | "browse">("info");
   const sheetWidthRef = useRef(544);
 
   useEffect(() => {
@@ -329,25 +330,21 @@ function SkillDetailSheet({
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
                 <Pill>{sourceLabel}</Pill>
                 <Pill tone={isWorkspace && isDisabled ? "muted" : activeSkill.available ? "success" : "muted"}>{statusLabel}</Pill>
+                {isWorkspace ? (
+                  <span className="inline-flex items-center gap-1.5 ml-1">
+                    {toggling ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden /> : null}
+                    <span className="scale-75 origin-left">
+                      <Switch
+                        checked={!isDisabled}
+                        onCheckedChange={handleToggle}
+                        disabled={toggling}
+                      />
+                    </span>
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>
-
-          {isWorkspace ? (
-            <div className="mt-5 flex items-center justify-between rounded-[16px] bg-muted/35 px-4 py-3">
-              <span className="text-[13px] font-medium text-foreground">
-                {t("settings.skills.enabled", { defaultValue: "Enabled" })}
-              </span>
-              <div className="flex items-center gap-2">
-                {toggling ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden /> : null}
-                <Switch
-                  checked={!isDisabled}
-                  onCheckedChange={handleToggle}
-                  disabled={toggling}
-                />
-              </div>
-            </div>
-          ) : null}
 
           {toggleError ? (
             <div className="mt-3 rounded-[12px] bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
@@ -365,37 +362,71 @@ function SkillDetailSheet({
               {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
             </div>
           ) : (
-            <div className="mt-7 flex flex-col min-h-0 flex-1 gap-6">
-              <DetailSection title={t("settings.skills.descriptionTitle", { defaultValue: "Description" })}>
-                <p className="text-[14px] leading-6 text-muted-foreground">{activeSkill.description}</p>
-              </DetailSection>
-
-              <div className="grid grid-cols-2 gap-2">
-                <MetaItem
-                  label={t("settings.skills.source", { defaultValue: "Source" })}
-                  value={sourceLabel}
-                />
-                <MetaItem
-                  label={t("settings.skills.status", { defaultValue: "Status" })}
-                  value={statusLabel}
-                />
+            <div className="mt-5 flex flex-col min-h-0 flex-1 gap-4">
+              {/* Tabs */}
+              <div className="flex items-center gap-0.5 rounded-[12px] bg-muted/40 p-0.5 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("info")}
+                  className={cn(
+                    "rounded-[10px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+                    activeTab === "info"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t("settings.skills.basicInfo", { defaultValue: "Basic Info" })}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("browse")}
+                  className={cn(
+                    "rounded-[10px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+                    activeTab === "browse"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t("settings.skills.skillBrowse", { defaultValue: "Browse Skill" })}
+                </button>
               </div>
 
-              {!activeSkill.available && activeSkill.unavailable_reason && !(isWorkspace && isDisabled) ? (
-                <DetailSection
-                  title={t("settings.skills.unavailableReasonLabel", {
-                    defaultValue: "Unavailable reason",
-                  })}
-                >
-                  <p className="text-[13px] leading-5 text-destructive/85">
-                    {activeSkill.unavailable_reason}
-                  </p>
-                </DetailSection>
-              ) : null}
+              {activeTab === "info" ? (
+                <div className="flex flex-col gap-6">
+                  <DetailSection title={t("settings.skills.descriptionTitle", { defaultValue: "Description" })}>
+                    <p className="text-[14px] leading-6 text-muted-foreground">{activeSkill.description}</p>
+                  </DetailSection>
 
-              {detail ? <RequirementsSection detail={detail} /> : null}
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetaItem
+                      label={t("settings.skills.source", { defaultValue: "Source" })}
+                      value={sourceLabel}
+                    />
+                    <MetaItem
+                      label={t("settings.skills.status", { defaultValue: "Status" })}
+                      value={statusLabel}
+                    />
+                  </div>
 
-              {detail ? <SkillFilesPanel skillName={skill.name} token={token} /> : null}
+                  {!activeSkill.available && activeSkill.unavailable_reason && !(isWorkspace && isDisabled) ? (
+                    <DetailSection
+                      title={t("settings.skills.unavailableReasonLabel", {
+                        defaultValue: "Unavailable reason",
+                      })}
+                    >
+                      <p className="text-[13px] leading-5 text-destructive/85">
+                        {activeSkill.unavailable_reason}
+                      </p>
+                    </DetailSection>
+                  ) : null}
+
+                  {detail ? <RequirementsSection detail={detail} /> : null}
+                </div>
+              ) : (
+                <div className="flex flex-col min-h-0 flex-1">
+                  {detail ? <SkillFilesPanel skillName={skill.name} token={token} /> : null}
+                </div>
+              )}
             </div>
           )}
         </div>
