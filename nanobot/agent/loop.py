@@ -215,6 +215,9 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        bot_name: str = "nanobot",
+        bot_icon: str = "🐈",
+        gateway_url: str = "",
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -293,6 +296,9 @@ class AgentLoop:
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
         self._running = False
+        self.bot_name = bot_name
+        self.bot_icon = bot_icon
+        self.gateway_url = gateway_url
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
         self._mcp_connected = False
@@ -368,6 +374,17 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        gateway_url = extra.pop("gateway_url", None)
+        if gateway_url is None:
+            host = "127.0.0.1"
+            port = 8765
+            ws_cfg = getattr(config.channels, "websocket", None)
+            if ws_cfg is not None:
+                host = getattr(ws_cfg, "host", host) or host
+                port = getattr(ws_cfg, "port", port) or port
+            else:
+                host = getattr(config.gateway, "host", host) or host
+            gateway_url = f"http://{host}:{port}"
         return cls(
             bus=bus,
             provider=provider,
@@ -394,6 +411,9 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            bot_name=defaults.bot_name,
+            bot_icon=defaults.bot_icon,
+            gateway_url=gateway_url,
             **extra,
         )
 
@@ -1261,6 +1281,12 @@ class AgentLoop:
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
+
+        from nanobot.agent.tools.mcp import refresh_mcp_servers_config
+
+        prefixes = refresh_mcp_servers_config(self)
+        effective_tools = tools if tools is not None else self.tools
+        effective_tools.set_mcp_enabled_prefixes(prefixes)
 
         if msg.channel == "system":
             return await self._process_system_message(

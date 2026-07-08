@@ -577,9 +577,13 @@ export async function runMcpPresetAction(
   name: string,
   values: Record<string, string> = {},
   base: string = "",
+  enabled?: boolean,
 ): Promise<McpPresetsPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (enabled !== undefined) {
+    query.set("enabled", String(enabled));
+  }
   return request<McpPresetsPayload>(
     `${base}/api/settings/mcp-presets/${action}?${query}`,
     token,

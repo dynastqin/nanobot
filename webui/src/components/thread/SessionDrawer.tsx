@@ -389,6 +389,7 @@ function FilesTab({
     const pending = pendingAutoOpenRef.current;
     if (!pending || pending.seq !== pendingSeq) return;
     setSelectedPath(pending.path);
+    setTreeCollapsed(true);
     pendingAutoOpenRef.current = null;
   }, [pendingSeq, tree]);
 
@@ -399,6 +400,7 @@ function FilesTab({
     const pending = pendingAutoOpenRef.current;
     if (!pending) return;
     setSelectedPath(pending.path);
+    setTreeCollapsed(true);
     pendingAutoOpenRef.current = null;
   }, [tree]);
 

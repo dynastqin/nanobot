@@ -9,7 +9,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   CliAppMentionToken,
   McpPresetMentionToken,
@@ -26,7 +25,6 @@ import {
   Brain,
   CheckCircle2,
   ChevronDown,
-  ChevronUp,
   Circle,
   CircleHelp,
   Clock,
@@ -43,7 +41,6 @@ import {
   Sparkles,
   Square,
   SquarePen,
-  Target,
   Trash2,
   Undo2,
   X,
@@ -182,8 +179,6 @@ interface ThreadComposerProps {
   mcpPresets?: McpPresetInfo[];
   onStop?: () => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
-  /** Unix seconds from server; turn elapsed timer above input while set. */
-  runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   /** Plan progress for this chat (WebSocket ``plan_state``). Always visible when set. */
@@ -471,40 +466,6 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
-function goalStateStripPreview(
-  goal: GoalStateWsPayload | undefined,
-  t: (key: string) => string,
-): string | null {
-  if (!goal?.active) return null;
-  const summary = goal.ui_summary?.trim();
-  if (summary) return summary;
-  const obj = goal.objective?.trim();
-  if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
-  return t("thread.composer.goalStateFallback");
-}
-
-const GOAL_PANEL_VIEWPORT_TOP_PAD = 20;
-const GOAL_PANEL_GAP_ABOVE_STRIP_PX = 10;
-const GOAL_PANEL_MIN_HEIGHT_PX = 112;
-const GOAL_PANEL_MAX_VIEWPORT_RATIO = 0.62;
-
-function measureGoalPanelMaxCssHeight(stripTopY: number): number {
-  const viewport = visualViewportBounds();
-  const spaceAboveStrip =
-    stripTopY - viewport.top - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
-  return Math.min(
-    Math.max(spaceAboveStrip, GOAL_PANEL_MIN_HEIGHT_PX),
-    Math.floor(viewport.height * GOAL_PANEL_MAX_VIEWPORT_RATIO),
-  );
-}
-
-function buildGoalMarkdownBody(summary: string, objective: string): string {
-  const s = summary.trim();
-  const o = objective.trim();
-  if (s && o) return `${s}\n\n---\n\n${o}`;
-  return o || s;
-}
-
 function cliAppMentionPayload(app: CliAppInfo): OutboundCliAppMention {
   return {
     name: app.name,
@@ -627,257 +588,6 @@ function PlanComposerStrip({
   );
 }
 
-function RunPulseIcon() {
-  return (
-    <span className="run-pulse-icon relative flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-      <span className="run-pulse-icon__ring" />
-      <span className="run-pulse-icon__dot" />
-    </span>
-  );
-}
-
-function RunElapsedStrip({
-  startedAt,
-  goalState,
-}: {
-  startedAt: number | null;
-  goalState?: GoalStateWsPayload;
-}) {
-  const { t } = useTranslation();
-  const [goalPanelOpen, setGoalPanelOpen] = useState(false);
-  const showTimer = startedAt != null;
-  const stripLabel = goalStateStripPreview(goalState, t);
-  const showGoal = !!stripLabel?.trim();
-  const active = showTimer || showGoal;
-  const [renderStrip, setRenderStrip] = useState(active);
-  const [leaving, setLeaving] = useState(false);
-  const [, setTick] = useState(0);
-  const stripWrapperRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const expandToggleRef = useRef<HTMLButtonElement>(null);
-  const stripSnapshotRef = useRef<{
-    startedAt: number | null;
-    goalState?: GoalStateWsPayload;
-    stripLabel: string | null;
-  } | null>(null);
-  const [panelMaxPx, setPanelMaxPx] = useState(280);
-
-  if (active) {
-    stripSnapshotRef.current = { startedAt, goalState, stripLabel };
-  }
-
-  useEffect(() => {
-    if (active) {
-      setRenderStrip(true);
-      setLeaving(false);
-      return;
-    }
-    setGoalPanelOpen(false);
-    if (!renderStrip) return;
-    setLeaving(true);
-    const id = window.setTimeout(() => {
-      setRenderStrip(false);
-      setLeaving(false);
-    }, 180);
-    return () => window.clearTimeout(id);
-  }, [active, renderStrip]);
-
-  useEffect(() => {
-    if (startedAt == null) return;
-    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [startedAt]);
-
-  const display = active
-    ? { startedAt, goalState, stripLabel }
-    : stripSnapshotRef.current;
-  const displayStartedAt = display?.startedAt ?? null;
-  const displayGoalState = display?.goalState;
-  const displayStripLabel = display?.stripLabel ?? null;
-  const displayShowTimer = displayStartedAt != null;
-  const displayShowGoal = !!displayStripLabel?.trim();
-
-  const objectiveFull = displayGoalState?.objective?.trim() ?? "";
-  const summaryFull = displayGoalState?.ui_summary?.trim() ?? "";
-  const canExpandGoal = !!(active && displayGoalState?.active && (objectiveFull || summaryFull));
-
-  const markdownBody =
-    objectiveFull || summaryFull
-      ? buildGoalMarkdownBody(summaryFull, objectiveFull)
-      : "";
-
-  useLayoutEffect(() => {
-    if (!goalPanelOpen) return;
-
-    function relayout(): void {
-      const el = stripWrapperRef.current;
-      if (!el) return;
-      const top = el.getBoundingClientRect().top;
-      setPanelMaxPx(measureGoalPanelMaxCssHeight(top));
-    }
-
-    relayout();
-
-    preloadMarkdownText();
-    const ro =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => relayout())
-        : null;
-    if (stripWrapperRef.current && ro) {
-      ro.observe(stripWrapperRef.current);
-    }
-    const viewport = window.visualViewport;
-    viewport?.addEventListener("resize", relayout);
-    viewport?.addEventListener("scroll", relayout);
-    window.addEventListener("resize", relayout);
-    window.addEventListener("scroll", relayout, true);
-    return () => {
-      ro?.disconnect();
-      viewport?.removeEventListener("resize", relayout);
-      viewport?.removeEventListener("scroll", relayout);
-      window.removeEventListener("resize", relayout);
-      window.removeEventListener("scroll", relayout, true);
-    };
-  }, [goalPanelOpen]);
-
-  useEffect(() => {
-    if (!goalPanelOpen) return;
-
-    function onPointerDown(ev: MouseEvent): void {
-      const target = ev.target as Node | null;
-      if (!target) return;
-      if (panelRef.current?.contains(target)) return;
-      if (expandToggleRef.current?.contains(target)) return;
-      setGoalPanelOpen(false);
-    }
-
-    function onKey(ev: KeyboardEvent): void {
-      if (ev.key === "Escape") setGoalPanelOpen(false);
-    }
-
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [goalPanelOpen]);
-
-  if (!renderStrip || !display) return null;
-
-  const elapsed =
-    displayStartedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - displayStartedAt)) : 0;
-  const m = Math.floor(elapsed / 60);
-  const sec = elapsed % 60;
-  const shortElapsed = m > 0 ? `${m}:${sec.toString().padStart(2, "0")}` : `${sec}s`;
-  const timerTitle = displayShowTimer
-    ? t("thread.composer.runRuntimeTitle", { elapsed: shortElapsed })
-    : null;
-
-  const ariaParts = [timerTitle, displayShowGoal ? displayStripLabel : null].filter(Boolean);
-  const ariaLabel = ariaParts.join(" · ");
-
-  return (
-    <div
-      ref={stripWrapperRef}
-      className="composer-status-strip relative z-30"
-      data-state={leaving ? "exit" : "enter"}
-    >
-      {goalPanelOpen && canExpandGoal && markdownBody ? (
-        <div
-          ref={panelRef}
-          id="nanobot-goal-panel-root"
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="nanobot-goal-panel-title"
-          tabIndex={-1}
-          className={cn(
-            "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
-            "rounded-2xl border border-black/[0.08] bg-card shadow-[0_12px_40px_rgba(15,23,42,0.14)]",
-            "backdrop-blur-sm dark:border-white/[0.1] dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]",
-          )}
-          style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
-        >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
-            <h2
-              id="nanobot-goal-panel-title"
-              className="min-w-0 truncate text-[13px] font-semibold tracking-tight text-foreground"
-            >
-              {t("thread.composer.goalStateSheetTitle")}
-            </h2>
-            <button
-              type="button"
-              className={cn(
-                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              )}
-              aria-label={t("thread.composer.goalStateCloseAria")}
-              onClick={() => setGoalPanelOpen(false)}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          <div
-            id="nanobot-goal-panel-scroll"
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
-          >
-            <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
-              {markdownBody}
-            </MarkdownText>
-          </div>
-        </div>
-      ) : null}
-      <div
-        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
-        role="status"
-        aria-label={ariaLabel}
-      >
-        {displayShowTimer ? (
-          <RunPulseIcon />
-        ) : (
-          <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
-        )}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
-          {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
-          {timerTitle && displayShowGoal ? (
-            <span className="shrink-0 text-muted-foreground/45" aria-hidden>
-              ·
-            </span>
-          ) : null}
-          {displayShowGoal ? (
-            <span className="truncate">
-              {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
-            </span>
-          ) : null}
-        </span>
-        {canExpandGoal ? (
-          <button
-            ref={expandToggleRef}
-            type="button"
-            className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-              "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
-            aria-expanded={goalPanelOpen}
-            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
-            aria-label={t("thread.composer.goalStateExpandAria")}
-            title={t("thread.composer.goalStateExpandAria")}
-            onClick={() => setGoalPanelOpen((o) => !o)}
-          >
-            {goalPanelOpen ? (
-              <ChevronDown className="h-4 w-4" aria-hidden />
-            ) : (
-              <ChevronUp className="h-4 w-4" aria-hidden />
-            )}
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 export function ThreadComposer({
   onSend,
   disabled,
@@ -894,7 +604,6 @@ export function ThreadComposer({
   mcpPresets = [],
   onStop,
   onTranscribeAudio,
-  runStartedAt = null,
   goalState,
   planState,
   workspaceScope = null,

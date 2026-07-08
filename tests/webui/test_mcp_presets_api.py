@@ -68,7 +68,7 @@ def test_enable_browserbase_writes_scrubbed_config_payload(
         },
     )
 
-    assert payload["requires_restart"] is True
+    assert "requires_restart" not in payload
     assert payload["last_action"]["ok"] is True
     assert payload["last_action"]["installed"] is True
     assert payload["last_action"]["verification"] == ["config_present"]

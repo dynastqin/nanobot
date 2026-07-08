@@ -16,6 +16,7 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
+        self._mcp_enabled_prefixes: set[str] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -86,8 +87,25 @@ class ToolRegistry:
 
         builtins.sort(key=self._schema_name)
         mcp_tools.sort(key=self._schema_name)
+
+        if self._mcp_enabled_prefixes is not None:
+            mcp_tools = [
+                s for s in mcp_tools
+                if any(self._schema_name(s).startswith(p) for p in self._mcp_enabled_prefixes)
+            ]
+
         self._cached_definitions = builtins + mcp_tools
         return self._cached_definitions
+
+    def set_mcp_enabled_prefixes(self, prefixes: set[str] | None) -> None:
+        """Set enabled MCP server prefixes for filtering tool definitions.
+
+        Set to ``None`` to show all MCP tools (no filtering).
+        Invalidates the definition cache when the value changes.
+        """
+        if self._mcp_enabled_prefixes != prefixes:
+            self._mcp_enabled_prefixes = prefixes
+            self._cached_definitions = None
 
     def prepare_call(
         self,

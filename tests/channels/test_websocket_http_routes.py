@@ -603,7 +603,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         return {
             "presets": [],
             "installed_count": 1,
-            "requires_restart": action != "test",
+            "requires_restart": action not in {"test", "enable", "remove"},
             "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
         }
 
@@ -666,8 +666,8 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         assert preset_queries[-1][1]["browserbase_api_key"] == ["bb_live_secret"]
         body = enabled.json()
         assert "bb_live_secret" not in enabled.text
-        assert body["last_action"]["message"] == "enable:browserbase MCP config reloaded."
-        assert body["hot_reload"]["ok"] is True
+        assert body["last_action"]["message"] == "enable:browserbase"
+        assert "hot_reload" not in body
         assert body["restart_required_sections"] == []
 
         bad_header = await _http_get(

@@ -81,6 +81,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
@@ -709,6 +710,7 @@ export function SettingsView({
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [customMcpForm, setCustomMcpForm] = useState<CustomMcpForm>(DEFAULT_CUSTOM_MCP_FORM);
   const [mcpConfigImport, setMcpConfigImport] = useState("");
+  const [mcpDetailPreset, setMcpDetailPreset] = useState<McpPresetInfo | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, ProviderForm>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
@@ -1521,6 +1523,12 @@ export function SettingsView({
       if (action === "enable") {
         setMcpFieldValues((prev) => ({ ...prev, [name]: {} }));
       }
+      if (action === "remove") {
+        setMcpDetailPreset(null);
+      } else {
+        const updated = payload.presets.find((p) => p.name === name);
+        if (updated) setMcpDetailPreset((prev) => (prev?.name === name ? updated : prev));
+      }
     } catch (err) {
       setMcpError((err as Error).message);
     } finally {
@@ -1596,6 +1604,27 @@ export function SettingsView({
       await maybeRestartHostEngine(payload);
     } catch (err) {
       setMcpError((err as Error).message);
+    } finally {
+      setMcpPresetAction(null);
+    }
+  };
+
+  const handleMcpDetailToggle = async (name: string, enable: boolean) => {
+    setMcpPresetAction(`enable:${name}`);
+    setMcpError(null);
+    try {
+      const payload = await runMcpPresetAction(token, "enable", name, {}, "", enable);
+      setMcpPresets(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+      await maybeRestartHostEngine(payload);
+      const updated = payload.presets.find((p) => p.name === name);
+      if (updated) setMcpDetailPreset(updated);
+      notifyMcpPresetsChanged(payload);
+    } catch (err) {
+      setMcpError((err as Error).message);
+      throw err;
     } finally {
       setMcpPresetAction(null);
     }
@@ -1775,6 +1804,10 @@ export function SettingsView({
             onSaveCustomMcp={handleSaveCustomMcp}
             onImportMcpConfig={handleImportMcpConfig}
             onMcpToolsChange={handleMcpToolsChange}
+            mcpDetailPreset={mcpDetailPreset}
+            onOpenMcpDetail={setMcpDetailPreset}
+            onCloseMcpDetail={() => setMcpDetailPreset(null)}
+            onMcpToggle={handleMcpDetailToggle}
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
           />
@@ -5257,6 +5290,10 @@ function AppsCatalogSettings({
   onSaveCustomMcp,
   onImportMcpConfig,
   onMcpToolsChange,
+  mcpDetailPreset,
+  onOpenMcpDetail,
+  onCloseMcpDetail,
+  onMcpToggle,
   onRestart,
   isRestarting,
 }: {
@@ -5290,6 +5327,10 @@ function AppsCatalogSettings({
   onSaveCustomMcp: () => void;
   onImportMcpConfig: () => void;
   onMcpToolsChange: (name: string, enabledTools: string[]) => void;
+  mcpDetailPreset: McpPresetInfo | null;
+  onOpenMcpDetail: (preset: McpPresetInfo) => void;
+  onCloseMcpDetail: () => void;
+  onMcpToggle: (name: string, enable: boolean) => void;
   onRestart?: () => void;
   isRestarting?: boolean;
 }) {
@@ -5444,6 +5485,7 @@ function AppsCatalogSettings({
                   onFieldChange={onMcpFieldChange}
                   onAction={onMcpAction}
                   onToolsChange={onMcpToolsChange}
+                  onSelectDetail={onOpenMcpDetail}
                 />
               ),
             )}
@@ -5466,6 +5508,16 @@ function AppsCatalogSettings({
           onImportConfig={onImportMcpConfig}
         />
       ) : null}
+
+      <McpDetailSheet
+        preset={mcpDetailPreset}
+        open={mcpDetailPreset !== null}
+        onOpenChange={(open) => { if (!open) onCloseMcpDetail(); }}
+        showBrandLogos={showBrandLogos}
+        onToggle={onMcpToggle}
+        onAction={onMcpAction}
+        actionKey={mcpActionKey}
+      />
 
       <ThirdPartyBrandNotice />
     </div>
@@ -5567,6 +5619,7 @@ function McpAppsCatalogRow({
   onFieldChange,
   onAction,
   onToolsChange,
+  onSelectDetail,
 }: {
   preset: McpPresetInfo;
   values: Record<string, string>;
@@ -5575,6 +5628,7 @@ function McpAppsCatalogRow({
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
+  onSelectDetail: (preset: McpPresetInfo) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -5588,7 +5642,7 @@ function McpAppsCatalogRow({
   const missingFields = preset.required_fields.filter((field) => field.required && !field.configured);
   const hasFields = preset.required_fields.length > 0;
   const needsSetupInput = missingFields.length > 0;
-  const readyInstalled = preset.installed && preset.configured;
+  const readyInstalled = preset.installed && preset.configured && preset.enabled !== false;
   const canEnable =
     preset.install_supported &&
     (missingFields.length === 0 || missingFields.every((field) => Boolean(values[field.name]?.trim())));
@@ -5598,6 +5652,11 @@ function McpAppsCatalogRow({
   const enabledSet = new Set(allowAllTools ? toolNames : enabledTools);
   const description = preset.description || preset.note || preset.requires || preset.name;
   const statusLabel = mcpPresetStatusLabel(preset.status, tx);
+  const sourceLabel = preset.source === "custom"
+    ? tx("settings.mcp.sourceCustom", "Custom")
+    : tx("settings.mcp.sourceBuiltin", "Built-in");
+  const isAvailable = preset.installed && preset.configured && preset.enabled !== false;
+  const StatusIcon = isAvailable ? Check : CircleAlert;
 
   useEffect(() => {
     if (preset.configured || !preset.install_supported) setSetupOpen(false);
@@ -5624,68 +5683,72 @@ function McpAppsCatalogRow({
   };
 
   return (
-    <article className="rounded-[14px] transition-colors hover:bg-muted/45">
+    <button
+      type="button"
+      disabled={!preset.installed}
+      aria-label={t("settings.mcp.detailDescription", { name: preset.display_name, defaultValue: `Details for ${preset.display_name}.` })}
+      onClick={() => preset.installed && onSelectDetail(preset)}
+      className={cn(
+        "w-full text-left rounded-[14px] transition-colors hover:bg-muted/45",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        !preset.installed && "cursor-default hover:bg-transparent",
+      )}
+    >
       <div className="group flex min-w-0 items-center gap-3 px-3 py-3">
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
             <AppsTypeBadge>{tx("settings.apps.mcpLabel", "MCP")}</AppsTypeBadge>
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
+              {sourceLabel}
+            </span>
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {readyInstalled ? (
+        <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          {preset.installed ? (
             <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <AppsActionButton
-                    ariaLabel={statusLabel}
-                    busy={testBusy || toolsBusy}
-                    disabled={busy}
-                    tone="installed"
-                  >
-                    <Check className="h-4 w-4" aria-hidden />
-                  </AppsActionButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem disabled={busy} onClick={() => onAction("test", preset.name)}>
-                    <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
-                    {tx("settings.mcp.test", "Test")}
-                  </DropdownMenuItem>
-                  {toolNames.length ? (
+              {toolNames.length > 0 ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <span
+                      className={cn(
+                        "hidden shrink-0 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium sm:inline-flex",
+                        isAvailable
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      <StatusIcon className="h-3.5 w-3.5" aria-hidden />
+                      {isAvailable
+                        ? tx("settings.mcp.statusAvailable", "Available")
+                        : statusLabel}
+                    </span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
                     <DropdownMenuItem disabled={busy} onClick={() => setToolsOpen((open) => !open)}>
                       <SlidersHorizontal className="mr-2 h-3.5 w-3.5" aria-hidden />
                       {tx("settings.mcp.toolScope", "Tools")}
                     </DropdownMenuItem>
-                  ) : null}
-                  <DropdownMenuItem disabled={busy} onClick={() => onAction("remove", preset.name)}>
-                    <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
-                    {tx("settings.mcp.remove", "Remove")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <AppsActionButton
-                ariaLabel={tx("settings.mcp.remove", "Remove")}
-                busy={removeBusy}
-                disabled={busy && !removeBusy}
-                tone="danger"
-                onClick={() => onAction("remove", preset.name)}
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </AppsActionButton>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <span
+                  className={cn(
+                    "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium sm:inline-flex",
+                    isAvailable
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <StatusIcon className="h-3.5 w-3.5" aria-hidden />
+                  {isAvailable
+                    ? tx("settings.mcp.statusAvailable", "Available")
+                    : statusLabel}
+                </span>
+              )}
             </>
-          ) : preset.installed && !preset.configured ? (
-            <AppsActionButton
-              ariaLabel={hasFields ? tx("settings.mcp.configure", "Configure") : tx("settings.mcp.enable", "Enable")}
-              busy={enableBusy}
-              onClick={() => {
-                if (hasFields) setSetupOpen(true);
-                else onAction("enable", preset.name, values);
-              }}
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-            </AppsActionButton>
           ) : preset.install_supported ? (
             <AppsActionButton
               ariaLabel={needsSetupInput ? tx("settings.mcp.setup", "Set up") : tx("settings.mcp.enable", "Enable")}
@@ -5703,7 +5766,7 @@ function McpAppsCatalogRow({
       </div>
 
       {setupOpen && preset.install_supported && hasFields ? (
-        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm">
+        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-[12.5px] font-semibold text-foreground">
@@ -5774,7 +5837,7 @@ function McpAppsCatalogRow({
       ) : null}
 
       {toolsOpen && readyInstalled && toolNames.length ? (
-        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm">
+        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[11.5px] font-medium text-muted-foreground">
               {tx("settings.mcp.toolScope", "Tools")}
@@ -5825,7 +5888,7 @@ function McpAppsCatalogRow({
           </div>
         </div>
       ) : null}
-    </article>
+    </button>
   );
 }
 
@@ -5873,6 +5936,364 @@ const AppsActionButton = forwardRef<HTMLButtonElement, {
     </Button>
   );
 });
+
+function McpDetailSheet({
+  preset,
+  open,
+  onOpenChange,
+  showBrandLogos,
+  onToggle,
+  onAction,
+  actionKey,
+}: {
+  preset: McpPresetInfo | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  showBrandLogos: boolean;
+  onToggle: (name: string, enable: boolean) => void;
+  onAction: (action: "enable" | "remove" | "test", name: string) => void;
+  actionKey: string | null;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [toggling, setToggling] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    setRemoveConfirmOpen(false);
+  }, [preset?.name]);
+
+  if (!preset) return null;
+
+  const isEnabled = preset.installed && preset.configured && preset.enabled !== false;
+  const statusLabel = mcpPresetStatusLabel(preset.status, tx);
+  const toolNames = preset.tool_names ?? [];
+  const enabledTools = preset.enabled_tools ?? ["*"];
+  const allowAllTools = enabledTools.includes("*");
+  const enabledSet = new Set(allowAllTools ? toolNames : enabledTools);
+  const sourceLabel = preset.source === "custom"
+    ? tx("settings.mcp.sourceCustom", "Custom")
+    : tx("settings.mcp.sourceBuiltin", "Built-in");
+  const testBusy = actionKey === `test:${preset.name}`;
+  const removeBusy = actionKey === `remove:${preset.name}`;
+  const busy = testBusy || removeBusy || toggling;
+
+  const handleTest = () => onAction("test", preset.name);
+
+  const handleRemoveConfirm = () => {
+    onAction("remove", preset.name);
+    setRemoveConfirmOpen(false);
+  };
+
+  const handleToggle = async () => {
+    setToggling(true);
+    setToggleError(null);
+    try {
+      await onToggle(preset.name, !isEnabled);
+    } catch (err) {
+      setToggleError(
+        err instanceof Error ? err.message : tx("settings.mcp.toggleFailed", "Failed to toggle MCP service."),
+      );
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+        style={{ width: "min(calc(100vw - 1rem), 544px)" }}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 flex flex-col">
+          <div className="flex items-start gap-3 pr-8">
+            <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
+            <div className="min-w-0">
+              <SheetTitle className="truncate text-[20px] font-semibold">
+                {preset.display_name}
+              </SheetTitle>
+              <SheetDescription className="sr-only">
+                {t("settings.mcp.detailDescription", {
+                  name: preset.display_name,
+                  defaultValue: `Details for ${preset.display_name}.`,
+                })}
+              </SheetDescription>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+                <span className="inline-flex max-w-full items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  {sourceLabel}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    isEnabled
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {statusLabel}
+                </span>
+                <span className="inline-flex items-center gap-1.5 ml-1">
+                  {toggling ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden /> : null}
+                  <span className="scale-75 origin-left">
+                    <Switch
+                      checked={isEnabled}
+                      onCheckedChange={handleToggle}
+                      disabled={toggling}
+                    />
+                  </span>
+                  {preset.installed ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setRemoveConfirmOpen(true)}
+                      className="h-7 rounded-full px-3 text-[11px] font-medium text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      {removeBusy ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
+                      ) : (
+                        <Trash2 className="mr-1 h-3 w-3" aria-hidden />
+                      )}
+                      {tx("settings.mcp.remove", "Remove")}
+                    </Button>
+                  ) : null}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {toggleError ? (
+            <div className="mt-3 rounded-[12px] bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+              {toggleError}
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-col gap-6">
+            {preset.description ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.basicInfo", "Basic Info")}
+                </h3>
+                <p className="text-[14px] leading-6 text-muted-foreground">{preset.description}</p>
+              </section>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-[16px] bg-muted/35 px-3 py-2.5">
+                <div className="text-[11px] text-muted-foreground">
+                  {tx("settings.mcp.transportLabel", "Transport")}
+                </div>
+                <div className="mt-0.5 truncate text-[13px] font-medium text-foreground">
+                  {preset.transport}
+                </div>
+              </div>
+              <div className="rounded-[16px] bg-muted/35 px-3 py-2.5">
+                <div className="text-[11px] text-muted-foreground">
+                  {tx("settings.mcp.source", "Source")}
+                </div>
+                <div className="mt-0.5 truncate text-[13px] font-medium text-foreground">
+                  {sourceLabel}
+                </div>
+              </div>
+            </div>
+
+            {preset.connection_summary ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.connectionSummary", "Connection")}
+                </h3>
+                <p className="text-[13px] leading-5 text-foreground/80">{preset.connection_summary}</p>
+              </section>
+            ) : null}
+
+            {preset.note ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.note", "Note")}
+                </h3>
+                <p className="text-[13px] leading-5 text-muted-foreground">{preset.note}</p>
+              </section>
+            ) : null}
+
+            {preset.requires ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.requires", "Requires")}
+                </h3>
+                <p className="text-[13px] leading-5 text-muted-foreground font-mono">{preset.requires}</p>
+              </section>
+            ) : null}
+
+            {preset.docs_url ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.documentation", "Documentation")}
+                </h3>
+                <a
+                  href={preset.docs_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[13px] font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.mcp.openDocs", "Open docs")}
+                </a>
+              </section>
+            ) : null}
+
+            {preset.required_fields.length > 0 ? (
+              <section>
+                <h3 className="mb-2 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.credentials", "Credentials")}
+                </h3>
+                <div className="space-y-1.5">
+                  {preset.required_fields.map((field) => (
+                    <div
+                      key={field.name}
+                      className="flex items-center justify-between gap-2 rounded-[10px] bg-muted/35 px-3 py-2"
+                    >
+                      <span className="text-[13px] font-medium text-foreground truncate">{field.label}</span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        {field.configured ? (
+                          <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-300">
+                            {tx("settings.mcp.configuredField", "Configured")}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-medium text-muted-foreground">
+                            {tx("settings.mcp.requiredField", "Required")}
+                          </span>
+                        )}
+                        {field.secret ? (
+                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {tx("settings.mcp.secretField", "Secret")}
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {preset.checked_at ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.mcp.lastChecked", "Last checked")}
+                </h3>
+                <p className="text-[13px] text-muted-foreground">
+                  {new Date(preset.checked_at).toLocaleString()}
+                </p>
+              </section>
+            ) : null}
+
+            {preset.error ? (
+              <section>
+                <h3 className="mb-1.5 text-[12px] font-medium text-destructive">
+                  {tx("settings.mcp.errorLabel", "Error")}
+                </h3>
+                <p className="rounded-[12px] bg-destructive/10 px-3 py-2 text-[13px] leading-5 text-destructive">
+                  {preset.error}
+                </p>
+              </section>
+            ) : null}
+          </div>
+
+          {preset.installed ? (
+            <div className="mt-5 border-t border-border/45 pt-4">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={handleTest}
+                className="h-9 rounded-full px-4 text-[13px] font-medium"
+              >
+                {testBusy ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                )}
+                {tx("settings.mcp.test", "Test")}
+              </Button>
+            </div>
+          ) : null}
+
+          {preset.installed && toolNames.length > 0 ? (
+            <div className="mt-4">
+              <h3 className="mb-2 text-[12px] font-medium text-muted-foreground">
+                {t("settings.mcp.toolsCount", { count: toolNames.length, defaultValue: `${toolNames.length} tools` })}
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {toolNames.map((toolName) => {
+                  const selected = enabledSet.has(toolName);
+                  return (
+                    <span
+                      key={toolName}
+                      className={cn(
+                        "max-w-full rounded-full border px-2.5 py-1 font-mono text-[11px]",
+                        selected
+                          ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                          : "border-border/55 bg-muted/30 text-muted-foreground",
+                      )}
+                    >
+                      <span className="block max-w-[220px] truncate">{toolName}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </SheetContent>
+
+      <Dialog open={removeConfirmOpen} onOpenChange={setRemoveConfirmOpen}>
+        <DialogContent className="max-w-[420px] rounded-[28px] border-border/55 bg-card/95 p-0 shadow-[0_28px_90px_rgba(15,23,42,0.20)] backdrop-blur-xl dark:border-white/10">
+          <div className="px-5 py-4">
+            <DialogHeader className="text-left">
+              <DialogTitle className="text-[18px] font-semibold tracking-[-0.01em]">
+                {tx("settings.mcp.removeTitle", "Remove MCP service")}
+              </DialogTitle>
+              <DialogDescription className="text-[12.5px] leading-5">
+                {t("settings.mcp.removeDescription", {
+                  name: preset.display_name,
+                  defaultValue: `Remove ${preset.display_name}? This cannot be undone.`,
+                })}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2 border-t border-border/45 px-5 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={removeBusy}
+              onClick={() => setRemoveConfirmOpen(false)}
+              className="h-9 rounded-full px-4 text-[13px] font-medium"
+            >
+              {tx("actions.cancel", "Cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={removeBusy}
+              onClick={handleRemoveConfirm}
+              className="h-9 rounded-full px-4 text-[13px] font-medium"
+            >
+              {removeBusy ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : null}
+              {tx("settings.mcp.remove", "Remove")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Sheet>
+  );
+}
 
 function appsTitle(item: AppsCatalogItem): string {
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
@@ -6152,6 +6573,8 @@ function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string
   switch (status) {
     case "configured":
       return tx("settings.mcp.statusConfigured", "Configured");
+    case "disabled":
+      return tx("settings.mcp.statusDisabled", "Disabled");
     case "missing_credentials":
       return tx("settings.mcp.statusMissingCredentials", "Needs key");
     case "missing_dependency":
@@ -6174,6 +6597,7 @@ function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; show
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || preset.name.slice(0, 2).toUpperCase();
+  const isCustom = preset.source === "custom";
 
   useEffect(() => setLogoIndex(0), [preset.logo_url]);
 
@@ -6192,6 +6616,15 @@ function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; show
       </span>
     );
   }
+
+  if (isCustom) {
+    return (
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
+        <Server className="h-5 w-5" strokeWidth={1.8} aria-hidden />
+      </span>
+    );
+  }
+
   return (
     <span
       className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] text-[13px] font-semibold text-white"

@@ -927,6 +927,25 @@ def runtime_lines(
     return lines
 
 
+def refresh_mcp_servers_config(state: Any) -> set[str]:
+    """Re-read MCP server config from disk and update state._mcp_servers.
+
+    Returns the set of enabled server tool prefixes (sanitized) for tool filtering.
+    Does NOT create or tear down any MCP connections — safe to call from any task.
+    """
+    try:
+        from nanobot.config.loader import load_config, resolve_config_env_vars
+
+        config = resolve_config_env_vars(load_config())
+        next_servers = dict(config.tools.mcp_servers)
+    except Exception:
+        logger.debug("MCP config refresh could not read config, keeping current servers")
+        return {_tool_prefix(name) for name, cfg in state._mcp_servers.items() if getattr(cfg, "enabled", True)}
+
+    state._mcp_servers = next_servers
+    return {_tool_prefix(name) for name, cfg in next_servers.items() if getattr(cfg, "enabled", True)}
+
+
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
     missing_servers = {

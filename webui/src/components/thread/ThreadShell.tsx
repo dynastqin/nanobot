@@ -120,7 +120,7 @@ function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boo
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
-const FILE_PREVIEW_DEFAULT_WIDTH = 550; // 右侧抽屉，默认宽度
+const FILE_PREVIEW_DEFAULT_WIDTH = 800; // 右侧抽屉，默认宽度
 const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
 
@@ -376,7 +376,6 @@ export function ThreadShell({
   const {
     messages,
     isStreaming,
-    runStartedAt,
     goalState,
     planState,
     send,
@@ -791,7 +790,6 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
-          runStartedAt={runStartedAt}
           goalState={goalState}
           planState={planState}
           workspaceScope={workspaceScope}
@@ -821,7 +819,6 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
-          runStartedAt={runStartedAt}
           onTranscribeAudio={transcribeAudio}
           goalState={goalState}
           workspaceScope={workspaceScope}

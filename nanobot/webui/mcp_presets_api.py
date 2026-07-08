@@ -632,6 +632,8 @@ def _config_available(cfg: MCPServerConfig | None) -> bool:
 def _status_for(preset: McpPreset, cfg: MCPServerConfig | None) -> str:
     if cfg is None:
         return "not_installed" if preset.install_supported else "coming_soon"
+    if not getattr(cfg, "enabled", True):
+        return "disabled"
     if any(field.required and not _field_configured(field, cfg) for field in preset.fields):
         return "missing_credentials"
     if cfg.command and not _command_available(cfg.command):
@@ -776,6 +778,7 @@ def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerCo
         "brand_color": preset.brand_color,
         "required_fields": [_field_payload(field, cfg) for field in preset.fields],
         "connection_summary": _connection_summary(cfg),
+        "enabled": getattr(cfg, "enabled", True),
         "enabled_tools": _tool_allowlist(cfg),
         "source": "preset",
         "manifest": _preset_manifest(preset, logo_url=logo_url),
@@ -810,6 +813,7 @@ def _custom_payload(
         "brand_color": "#64748B",
         "required_fields": [],
         "connection_summary": _connection_summary(cfg),
+        "enabled": getattr(cfg, "enabled", True),
         "enabled_tools": _tool_allowlist(cfg),
         "tool_names": tool_names or [],
         "source": "custom",
@@ -847,7 +851,15 @@ def _display_name_for(name: str, preset: McpPreset | None = None) -> str:
     return preset.display_name if preset is not None else name
 
 
-def _action_message(action: str, preset: McpPreset, *, ok: bool = True) -> dict[str, Any]:
+def _action_message(action: str, preset: McpPreset, *, ok: bool = True, enabled: bool = True) -> dict[str, Any]:
+    if action == "enable" and not enabled:
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "message": f"Disabled MCP preset for {preset.display_name}.",
+            "installed": True,
+            "verification": ["config_present"],
+        }
+        return payload
     verb = {
         "enable": "Enabled",
         "remove": "Removed",
@@ -974,11 +986,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
         if ok:
             last_action = {
                 "ok": True,
-                "message": (
-                    f"{display_name} connected with {len(tool_names)} tools."
-                    if tool_names
-                    else f"{display_name} connected, but reported no tools."
-                ),
+                "message": "",
                 "tool_count": len(tool_names),
                 "tool_names": tool_names[:_MAX_TEST_TOOLS],
                 "checked_at": _checked_at(),
@@ -1225,12 +1233,31 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
     existing = config.tools.mcp_servers.get(name)
 
     if action == "enable":
+        enabled_value = _query_first(query, "enabled")
+        enable_flag = enabled_value is None or enabled_value.lower() != "false"
+
+        if existing is not None:
+            existing.enabled = enable_flag
+            config.tools.mcp_servers[name] = existing
+            save_config(config)
+            display_name = _display_name_for(name, preset)
+            last_action = {
+                "ok": True,
+                "message": f"{'Enabled' if enable_flag else 'Disabled'} MCP server {display_name}.",
+                "installed": True,
+                "verification": ["config_present"],
+            }
+            payload = mcp_presets_payload(last_action=last_action)
+            return payload
+
         if preset is None:
             raise McpPresetError("unknown MCP preset", status=404)
-        config.tools.mcp_servers[preset.name] = _materialize_server(preset, query, existing)
+        if not enable_flag:
+            raise McpPresetError("Cannot disable a preset that is not installed", status=409)
+        cfg = _materialize_server(preset, query, existing)
+        config.tools.mcp_servers[preset.name] = cfg
         save_config(config)
-        payload = mcp_presets_payload(last_action=_action_message(action, preset))
-        payload["requires_restart"] = True
+        payload = mcp_presets_payload(last_action=_action_message(action, preset, enabled=True))
         return payload
 
     if action == "remove":
@@ -1307,6 +1334,9 @@ async def mcp_presets_settings_action(
         payload = await asyncio.to_thread(custom_mcp_action, action, query)
     else:
         payload = await asyncio.to_thread(mcp_presets_action, action, query)
-    if reload_mcp is not None:
+    # Enable/disable/remove are config-only changes that take effect for new
+    # sessions. Hot-reloading them tears down live anyio cancel scopes inside
+    # the agent loop task and can crash the gateway.
+    if reload_mcp is not None and action not in {"enable", "remove"}:
         payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
     return payload

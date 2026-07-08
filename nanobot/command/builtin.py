@@ -9,6 +9,9 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
@@ -213,9 +216,30 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.invalidate(session.key)
     if snapshot:
         loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
+
+    tz_name = loop.context.timezone or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    now = datetime.now(tz).strftime("%Y/%m/%d %H:%M:%S %Z")
+
+    icon = loop.bot_icon or ""
+    name = loop.bot_name or "nanobot"
+    identity = f"{icon} · {name}" if icon else name
+
+    second_parts = [f"agent nanobot({identity})"]
+    if loop.gateway_url:
+        second_parts.append(f"WebUI: {loop.gateway_url}")
+
+    lines = [
+        f"**New session started**. {now}",
+        f"*{' - '.join(second_parts)}*",
+    ]
+
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-        content="New session started.",
+        content="\n".join(lines),
         metadata=dict(ctx.msg.metadata or {})
     )
 

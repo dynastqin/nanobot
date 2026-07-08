@@ -83,6 +83,11 @@ class TestMidTurnCommandDispatchedDirectly:
         loop.sessions.invalidate = MagicMock()
         loop._schedule_background = MagicMock()
         loop._cancel_active_tasks = AsyncMock(return_value=0)
+        loop.bot_name = "nanobot"
+        loop.bot_icon = "🐈"
+        loop.gateway_url = "http://127.0.0.1:18790"
+        loop.context = MagicMock()
+        loop.context.timezone = "UTC"
         return loop
 
     @pytest.fixture()
