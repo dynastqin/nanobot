@@ -11,6 +11,10 @@ Your workspace is at: {{ workspace_path }}
   or "generated files directory", this is the location. Always save code,
   documents, images, and all generated files here. Do not write generated files
   directly to the workspace root.
+  When you mention a generated file in your final reply, write its **full absolute path**
+  (e.g. `/Users/outputs_xxx/file.html`). The frontend renders absolute paths as
+  clickable links that open the file. Never abbreviate with `...`, omit directory parts,
+  or use a bare filename — the user cannot open a truncated path.
 
 {{ platform_policy }}
 {% if channel == 'telegram' or channel == 'qq' or channel == 'discord' %}
