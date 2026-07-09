@@ -32,6 +32,7 @@ import {
 import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
 import { formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
+import { ToolCallDetail } from "@/components/thread/activity/ToolCallDetail";
 import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
 /** Scrollport height for the Cursor-style “live trace” strip (tailwind spacing). */
@@ -658,29 +659,6 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function ActivityTraceList({
-  lines,
-  active,
-  evidenceByLine,
-}: {
-  lines: string[];
-  active: boolean;
-  evidenceByLine?: Map<string, ActivityEvidence[]>;
-}) {
-  return (
-    <ul className="space-y-1">
-      {lines.map((line, index) => (
-        <ActivityTraceRow
-          key={`${line}-${index}`}
-          line={line}
-          active={active && index === lines.length - 1}
-          evidence={evidenceByLine?.get(line) ?? []}
-        />
-      ))}
-    </ul>
-  );
-}
-
 function ActivityTraceTimeline({
   message,
   active,
@@ -701,15 +679,30 @@ function ActivityTraceTimeline({
   const items: ReactNode[] = [];
   let normalLines: string[] = [];
 
+  // Build a lookup: trace line → ToolProgressEvent
+  const eventByLine = useMemo(() => {
+    const map = new Map<string, ToolProgressEvent>();
+    for (const event of message.toolEvents ?? []) {
+      const traceLine = formatToolCallTrace(event);
+      if (traceLine) map.set(traceLine, event);
+    }
+    return map;
+  }, [message.toolEvents]);
+
   const flushNormalLines = (suffix: string) => {
     if (!normalLines.length) return;
     items.push(
-      <ActivityTraceList
-        key={`${message.id}:trace:${suffix}`}
-        lines={normalLines}
-        active={active}
-        evidenceByLine={evidenceByLine}
-      />,
+      <ul key={`${message.id}:trace:${suffix}`} className="space-y-1">
+        {normalLines.map((line, index) => (
+          <ActivityTraceRow
+            key={`${line}-${suffix}-${index}`}
+            line={line}
+            active={active && index === normalLines.length - 1}
+            evidence={evidenceByLine?.get(line) ?? []}
+            toolEvent={eventByLine.get(line)}
+          />
+        ))}
+      </ul>,
     );
     normalLines = [];
   };
@@ -809,7 +802,17 @@ function ActivityTraceTimeline({
   );
 }
 
-function ActivityTraceRow({ line, active, evidence = [] }: { line: string; active: boolean; evidence?: ActivityEvidence[] }) {
+function ActivityTraceRow({
+  line,
+  active,
+  evidence = [],
+  toolEvent,
+}: {
+  line: string;
+  active: boolean;
+  evidence?: ActivityEvidence[];
+  toolEvent?: ToolProgressEvent;
+}) {
   const trace = describeTraceLine(line);
   const Icon = trace.kind === "search"
     ? Search
@@ -829,6 +832,7 @@ function ActivityTraceRow({ line, active, evidence = [] }: { line: string; activ
       title={`${trace.label}${trace.detail ? ` ${trace.detail}` : ""}`}
     >
       <ActivityEvidencePreview evidence={evidence} />
+      {toolEvent ? <ToolCallDetail event={toolEvent} /> : null}
     </ActivityStep>
   );
 }

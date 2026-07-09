@@ -108,6 +108,20 @@ export function toolTraceLinesFromEvents(events: unknown): string[] {
   return lines;
 }
 
+/** Find the most recent ToolProgressEvent whose formatted trace matches `line`. */
+export function findToolEventForLine(
+  events: ToolProgressEvent[] | undefined,
+  line: string,
+): ToolProgressEvent | undefined {
+  if (!events?.length) return undefined;
+  // Walk in reverse so a later "end" event takes precedence over "start".
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (formatToolCallTrace(event) === line) return event;
+  }
+  return undefined;
+}
+
 export function mergeUniqueToolTraceLines(
   previousTraces: string[],
   lines: string[],
