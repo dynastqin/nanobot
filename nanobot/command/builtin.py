@@ -228,14 +228,13 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     name = loop.bot_name or "nanobot"
     identity = f"{icon} · {name}" if icon else name
 
-    second_parts = [f"agent nanobot({identity})"]
-    if loop.gateway_url:
-        second_parts.append(f"WebUI: {loop.gateway_url}")
-
     lines = [
         f"**New session started**. {now}",
-        f"*{' - '.join(second_parts)}*",
+        f"- **Agent**: nanobot v{__version__}({identity})",
+        f"- **Model**: {loop.model}",
     ]
+    if loop.gateway_url:
+        lines.append(f"- **WebUI**: `{loop.gateway_url}`")
 
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,

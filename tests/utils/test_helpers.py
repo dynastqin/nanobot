@@ -34,13 +34,13 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
 
 
 def test_outputs_dir_for_session_normal_key():
-    assert outputs_dir_for_session("websocket_abc123") == "outputs_websocket_abc123"
+    assert outputs_dir_for_session("websocket_abc123") == "outputs/websocket_abc123"
 
 
 def test_outputs_dir_for_session_strips_unsafe_chars():
-    assert outputs_dir_for_session("websocket:abc123") == "outputs_websocket_abc123"
+    assert outputs_dir_for_session("websocket:abc123") == "outputs/websocket_abc123"
 
 
 def test_outputs_dir_for_session_none_falls_back_to_default():
-    assert outputs_dir_for_session(None) == "outputs_default"
-    assert outputs_dir_for_session("") == "outputs_default"
+    assert outputs_dir_for_session(None) == "outputs/default"
+    assert outputs_dir_for_session("") == "outputs/default"

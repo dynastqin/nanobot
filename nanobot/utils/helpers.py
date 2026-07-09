@@ -281,11 +281,11 @@ def outputs_dir_for_session(session_key: str | None) -> str:
 
     Sanitizes the session_key so characters like ':' (unsafe in directory names
     on Windows / shown as '/' in macOS Finder) are replaced with '_'.
-    Falls back to 'outputs_default' when session_key is missing.
+    Falls back to 'outputs/default' when session_key is missing.
     """
     if not session_key:
-        return "outputs_default"
-    return f"outputs_{safe_filename(session_key)}"
+        return "outputs/default"
+    return f"outputs/{safe_filename(session_key)}"
 
 
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:

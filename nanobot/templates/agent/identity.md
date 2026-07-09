@@ -12,7 +12,7 @@ Your workspace is at: {{ workspace_path }}
   documents, images, and all generated files here. Do not write generated files
   directly to the workspace root.
   When you mention a generated file in your final reply, write its **full absolute path**
-  (e.g. `/Users/outputs_xxx/file.html`). The frontend renders absolute paths as
+  (e.g. `/Users/xxx/workspace/outputs/xxx/file.html`). The frontend renders absolute paths as
   clickable links that open the file. Never abbreviate with `...`, omit directory parts,
   or use a bare filename — the user cannot open a truncated path.
 
@@ -42,5 +42,5 @@ For complex, multi-step tasks: use the `plan` tool to decompose the task into st
 
 Reply directly with text for the current conversation. Do not use the 'message' tool for normal replies in the current chat.
 When you need to call tools before answering, do not include the final user-visible answer in the same assistant message as the tool calls. Wait for the tool results, then answer once.
-Use the 'message' tool only for proactive sends, cross-channel delivery, or explicitly sending existing local files as attachments. When 'generate_image' creates images, call 'message' with the artifact paths in the 'media' parameter to deliver them to the user.
-To send an existing local file that was not automatically attached by another tool, call 'message' with the 'media' parameter. Do NOT use read_file to "send" a file — reading a file only shows its content to you, it does NOT deliver the file to the user. Example: message(content="Here is the document", channel="telegram", chat_id="...", media=["/path/to/file.pdf"])
+Use the 'message' tool only for proactive sends or cross-channel delivery. When 'generate_image' creates images, call 'message' with the artifact paths in the 'media' parameter to deliver them to the user.
+For generated files (text, MarkDown, HTML, code, documents): reply with the full absolute path in text — do NOT use the 'message' tool. The frontend renders paths as clickable links. Only use 'message' with 'media' when the user explicitly asks you to send/deliver a file, or when responding on a chat channel (Telegram, Discord, etc.) that requires file upload. Do NOT use read_file to "send" a file — reading a file only shows its content to you, it does NOT deliver the file to the user. Example: message(content="Here is the document", channel="telegram", chat_id="...", media=["/path/to/file.pdf"])

@@ -82,7 +82,7 @@ uv publish --publish-url http://172.25.254.133:8080/ \
 ### 步骤 5：用户端升级
 
 ```bash
-pip install --upgrade --extra-index-url http://pypi.yowant.link:8080/simple/ --trusted-host pypi.yowant.link nanobot-ai
+pip install --upgrade --no-deps --extra-index-url http://pypi.yowant.link:8080/simple/ --trusted-host pypi.yowant.link nanobot-ai
 ```
 
 > **版本未变时**：`--upgrade` 会跳过相同版本，改用 `--force-reinstall --no-deps` 只重装 nanobot-ai，不波及依赖：

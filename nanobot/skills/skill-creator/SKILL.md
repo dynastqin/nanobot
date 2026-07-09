@@ -47,7 +47,7 @@ Think of the agent as exploring a path: a narrow bridge with cliffs needs specif
 
 Skills should work across agent frameworks (nanobot, Claude Code, Codex, etc.). Never hardcode framework-specific paths. Instead, use natural language that the agent resolves from its system prompt:
 
-- **Output files**: Say "save to the outputs directory" — the agent framework declares this location in its system prompt (e.g., `Outputs directory: /path/to/outputs/`). Never write `{{ AGENT_OUTPUTS_DIR }}` or hardcode paths like `~/.nanobot/workspace/outputs_xxx/`.
+- **Output files**: Say "save to the outputs directory" — the agent framework declares this location in its system prompt (e.g., `Outputs directory: /path/to/outputs/`). Never write `{{ AGENT_OUTPUTS_DIR }}` or hardcode paths like `~/.nanobot/workspace/outputs/xxx/`.
 - **Workspace root**: Say "the workspace root" — the framework declares this too.
 - **Temp files**: Say "a temporary directory" — the agent knows how to resolve this.
 

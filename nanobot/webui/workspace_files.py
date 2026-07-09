@@ -32,8 +32,7 @@ def _build_tree(
     root: Path,
     depth: int,
     counter: list[int],
-    allowed_outputs: str | None = None,
-    is_workspace_root: bool = False,
+    allowed_name: str | None = None,
 ) -> dict[str, Any] | None:
     """Recursively build a file tree node. Returns None if this subtree is empty."""
     if depth > MAX_DEPTH or counter[0] >= MAX_ENTRIES:
@@ -46,12 +45,8 @@ def _build_tree(
                 name = entry.name
                 if name.startswith("."):
                     continue
-                if is_workspace_root and depth == 0:
-                    allowed = {"skills"}
-                    if allowed_outputs:
-                        allowed.add(allowed_outputs)
-                    if name not in allowed:
-                        continue
+                if depth == 0 and allowed_name and name != allowed_name:
+                    continue
 
                 counter[0] += 1
                 if counter[0] > MAX_ENTRIES:
@@ -96,9 +91,9 @@ def list_workspace_files(
 ) -> dict[str, Any]:
     """Return a recursive file tree rooted at *subpath* inside *scope*.
 
-    At the workspace root (depth 0), only ``skills/`` and the caller's
-    per-session ``outputs_<session_id>/`` directory are listed. Other sessions'
-    outputs and the legacy ``outputs/`` directory are hidden.
+    When *subpath* is ``"."`` (default) and *session_key* is provided, the
+    tree is rooted at ``outputs/`` and only the session's own subdirectory
+    is listed.
 
     Raises :class:`WebUIWorkspaceFilesError` on invalid input or boundary
     violations.
@@ -107,31 +102,36 @@ def list_workspace_files(
     if not cleaned:
         cleaned = "."
 
+    session_subdir: str | None = None
+    if cleaned == "." and session_key:
+        outputs_dir = outputs_dir_for_session(session_key)
+        session_subdir = outputs_dir.split("/", 1)[1] if "/" in outputs_dir else outputs_dir
+        cleaned = "outputs"
+
     try:
         resolved = resolve_allowed_path(
             cleaned,
             workspace=scope.project_path,
             allowed_root=scope.project_path,
-            strict=True,
+            strict=False,
         )
-    except FileNotFoundError as e:
-        raise WebUIWorkspaceFilesError(404, "path not found") from e
     except WorkspaceBoundaryError as e:
         raise WebUIWorkspaceFilesError(403, str(e)) from e
     except OSError as e:
         raise WebUIWorkspaceFilesError(400, "invalid path") from e
 
+    if not resolved.exists():
+        return {
+            "path": str(resolved),
+            "display_path": _display_path(resolved, scope.project_path),
+            "tree": {"name": resolved.name or str(resolved), "type": "directory", "children": []},
+        }
+
     if not resolved.is_dir():
         raise WebUIWorkspaceFilesError(400, "path is not a directory")
 
     counter = [0]
-    tree = _build_tree(
-        resolved,
-        0,
-        counter,
-        allowed_outputs=outputs_dir_for_session(session_key),
-        is_workspace_root=resolved == scope.project_path,
-    )
+    tree = _build_tree(resolved, 0, counter, allowed_name=session_subdir)
     if tree is None:
         return {
             "path": str(resolved),

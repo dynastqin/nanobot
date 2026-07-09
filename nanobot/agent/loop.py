@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
+import socket
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
@@ -384,6 +385,8 @@ class AgentLoop:
                 port = getattr(ws_cfg, "port", port) or port
             else:
                 host = getattr(config.gateway, "host", host) or host
+            if host in ("127.0.0.1", "localhost", "::1"):
+                host = socket.gethostbyname(socket.gethostname())
             gateway_url = f"http://{host}:{port}"
         return cls(
             bus=bus,
