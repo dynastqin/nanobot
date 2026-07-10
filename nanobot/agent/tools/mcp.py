@@ -949,7 +949,8 @@ def refresh_mcp_servers_config(state: Any) -> set[str]:
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
     missing_servers = {
-        name: cfg for name, cfg in state._mcp_servers.items() if name not in state._mcp_stacks
+        name: cfg for name, cfg in state._mcp_servers.items()
+        if name not in state._mcp_stacks and getattr(cfg, "enabled", True)
     }
     if state._mcp_connecting or not missing_servers:
         return
@@ -1012,7 +1013,10 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             for name in next_names
             if name not in state._mcp_stacks and name not in set(added) | set(changed)
         )
-        to_connect_names = sorted(set(added) | set(changed) | set(retry_missing))
+        to_connect_names = sorted(
+            name for name in set(added) | set(changed) | set(retry_missing)
+            if getattr(next_servers[name], "enabled", True)
+        )
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, AsyncExitStack] = {}
         if to_connect:

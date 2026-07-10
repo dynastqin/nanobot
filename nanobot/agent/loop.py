@@ -918,10 +918,17 @@ class AgentLoop:
                     )
                     continue
                 except asyncio.CancelledError:
-                    # Preserve real task cancellation so shutdown can complete cleanly.
-                    # Only ignore non-task CancelledError signals that may leak from integrations.
-                    if not self._running or asyncio.current_task().cancelling():
+                    # Only propagate when the loop has been intentionally stopped.
+                    # asyncio.current_task().cancelling() can be True spuriously due
+                    # to anyio cancel scope leaks from MCP client cleanup in a
+                    # different task, so we rely solely on self._running.
+                    if not self._running:
                         raise
+                    # Clear the cancellation state so subsequent awaits in this
+                    # iteration don't re-raise (Python 3.12+).
+                    ct = asyncio.current_task()
+                    if ct is not None and ct.cancelling():
+                        ct.uncancel()
                     continue
                 except Exception as e:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
@@ -1157,6 +1164,13 @@ class AgentLoop:
                 await stack.aclose()
             except (RuntimeError, BaseExceptionGroup):
                 logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+            except asyncio.CancelledError:
+                # anyio cancel scope leaks can propagate CancelledError into the
+                # cleanup task; suppress it and clear the cancellation state.
+                ct = asyncio.current_task()
+                if ct is not None and ct.cancelling():
+                    ct.uncancel()
+                logger.debug("MCP server '{}' cleanup cancelled (suppressed)", name)
         self._mcp_stacks.clear()
 
     def _schedule_background(self, coro) -> None:
