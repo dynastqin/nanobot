@@ -91,6 +91,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
+    {"name": "glm", "label": "GLM Search", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -837,6 +838,8 @@ def settings_payload(
             "base_url": search_config.base_url or None,
             "max_results": search_config.max_results,
             "timeout": search_config.timeout,
+            "glm_search_engine": getattr(search_config, "glm_search_engine", "search_std") or "search_std",
+            "glm_search_intent": getattr(search_config, "glm_search_intent", False),
             "providers": list(_WEB_SEARCH_PROVIDER_OPTIONS),
         },
         "web": {
@@ -1344,6 +1347,20 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
         if parsed_timeout < 1 or parsed_timeout > 120:
             raise WebUISettingsError("timeout must be between 1 and 120")
         set_search_value("timeout", parsed_timeout)
+
+    glm_search_engine = _query_first_alias(query, "glm_search_engine", "glmSearchEngine")
+    if glm_search_engine is not None:
+        glm_search_engine = glm_search_engine.strip()
+        if glm_search_engine not in {"search_std", "search_pro", "search_pro_sogou", "search_pro_quark"}:
+            raise WebUISettingsError("invalid glm_search_engine")
+        set_search_value("glm_search_engine", glm_search_engine)
+
+    glm_search_intent = _query_first_alias(query, "glm_search_intent", "glmSearchIntent")
+    if glm_search_intent is not None:
+        normalized = glm_search_intent.strip().lower()
+        if normalized not in {"1", "0", "true", "false", "yes", "no"}:
+            raise WebUISettingsError("glm_search_intent must be boolean")
+        set_search_value("glm_search_intent", normalized in {"1", "true", "yes"})
 
     use_jina_reader = _query_first_alias(query, "use_jina_reader", "useJinaReader")
     if use_jina_reader is not None:

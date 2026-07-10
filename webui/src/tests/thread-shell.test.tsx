@@ -166,6 +166,8 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       base_url: null,
       max_results: 5,
       timeout: 30,
+      glm_search_engine: "search_std",
+      glm_search_intent: false,
       providers: [],
     },
     web: {

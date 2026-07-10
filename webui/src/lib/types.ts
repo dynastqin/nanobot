@@ -413,6 +413,8 @@ export interface SettingsPayload {
     base_url?: string | null;
     max_results: number;
     timeout: number;
+    glm_search_engine: string;
+    glm_search_intent: boolean;
     providers: Array<{
       name: string;
       label: string;
@@ -746,6 +748,8 @@ export interface WebSearchSettingsUpdate {
   maxResults?: number;
   timeout?: number;
   useJinaReader?: boolean;
+  glmSearchEngine?: string;
+  glmSearchIntent?: boolean;
 }
 
 export interface NetworkSafetySettingsUpdate {

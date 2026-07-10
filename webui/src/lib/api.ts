@@ -795,6 +795,8 @@ export async function updateWebSearchSettings(
   if (update.useJinaReader !== undefined) {
     query.set("use_jina_reader", String(update.useJinaReader));
   }
+  if (update.glmSearchEngine !== undefined) query.set("glm_search_engine", update.glmSearchEngine);
+  if (update.glmSearchIntent !== undefined) query.set("glm_search_intent", String(update.glmSearchIntent));
   return request<SettingsPayload>(
     `${base}/api/settings/web-search/update?${query}`,
     token,

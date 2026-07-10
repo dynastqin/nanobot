@@ -61,6 +61,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { GlmSearchSettings } from "@/components/settings/GlmSearchSettings";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { Button } from "@/components/ui/button";
@@ -395,6 +396,8 @@ const DEFAULT_WEB_SEARCH_FORM: WebSearchSettingsUpdate = {
   maxResults: 5,
   timeout: 30,
   useJinaReader: true,
+  glmSearchEngine: "search_std",
+  glmSearchIntent: false,
 };
 
 const DEFAULT_IMAGE_GENERATION_FORM: ImageGenerationSettingsUpdate = {
@@ -464,6 +467,8 @@ function webSearchFormFromPayload(
     maxResults: payload.web_search.max_results,
     timeout: payload.web_search.timeout,
     useJinaReader: payload.web.fetch.use_jina_reader,
+    glmSearchEngine: payload.web_search.glm_search_engine ?? "search_std",
+    glmSearchIntent: payload.web_search.glm_search_intent ?? false,
   };
 }
 
@@ -1334,6 +1339,8 @@ export function SettingsView({
         maxResults: webSearchForm.maxResults,
         timeout: webSearchForm.timeout,
         useJinaReader: webSearchForm.useJinaReader,
+        glmSearchEngine: webSearchForm.glmSearchEngine,
+        glmSearchIntent: webSearchForm.glmSearchIntent,
       };
       if (
         webSearchProviderAcceptsApiKey(provider) &&
@@ -1355,6 +1362,8 @@ export function SettingsView({
         maxResults: payload.web_search.max_results,
         timeout: payload.web_search.timeout,
         useJinaReader: payload.web.fetch.use_jina_reader,
+        glmSearchEngine: payload.web_search.glm_search_engine ?? "search_std",
+        glmSearchIntent: payload.web_search.glm_search_intent ?? false,
       }));
       setWebSearchKeyVisible(false);
       setWebSearchKeyEditing(false);
@@ -1395,6 +1404,8 @@ export function SettingsView({
       maxResults: settings.web_search.max_results,
       timeout: settings.web_search.timeout,
       useJinaReader: settings.web.fetch.use_jina_reader,
+      glmSearchEngine: settings.web_search.glm_search_engine ?? "search_std",
+      glmSearchIntent: settings.web_search.glm_search_intent ?? false,
     });
     setWebSearchKeyVisible(false);
     setWebSearchKeyEditing(false);
@@ -1409,6 +1420,8 @@ export function SettingsView({
       maxResults: prev.maxResults ?? settings.web_search.max_results,
       timeout: prev.timeout ?? settings.web_search.timeout,
       useJinaReader: prev.useJinaReader ?? settings.web.fetch.use_jina_reader,
+      glmSearchEngine: prev.glmSearchEngine ?? settings.web_search.glm_search_engine ?? "search_std",
+      glmSearchIntent: prev.glmSearchIntent ?? settings.web_search.glm_search_intent ?? false,
     }));
     setWebSearchKeyVisible(false);
     setWebSearchKeyEditing(false);
@@ -3701,13 +3714,17 @@ function WebSettings({
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
+  const effectiveGlmSearchEngine = form.glmSearchEngine ?? settings.web_search.glm_search_engine ?? "search_std";
+  const effectiveGlmSearchIntent = form.glmSearchIntent ?? settings.web_search.glm_search_intent ?? false;
   const dirty =
     form.provider !== settings.web_search.provider ||
     apiKey.length > 0 ||
     baseUrl !== (settings.web_search.base_url ?? "") ||
     form.maxResults !== settings.web_search.max_results ||
     form.timeout !== settings.web_search.timeout ||
-    effectiveJinaReader !== settings.web.fetch.use_jina_reader;
+    effectiveJinaReader !== settings.web.fetch.use_jina_reader ||
+    effectiveGlmSearchEngine !== (settings.web_search.glm_search_engine ?? "search_std") ||
+    effectiveGlmSearchIntent !== (settings.web_search.glm_search_intent ?? false);
   const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const missingCredential =
     webSearchProviderRequiresApiKey(selectedProvider)
@@ -3846,6 +3863,18 @@ function WebSettings({
               suffix="s"
             />
           </SettingsRow>
+          {form.provider === "glm" ? (
+            <GlmSearchSettings
+              searchEngine={effectiveGlmSearchEngine}
+              searchIntent={effectiveGlmSearchIntent}
+              onSearchEngineChange={(glmSearchEngine) =>
+                onChangeForm((prev) => ({ ...prev, glmSearchEngine }))
+              }
+              onSearchIntentChange={(glmSearchIntent) =>
+                onChangeForm((prev) => ({ ...prev, glmSearchIntent }))
+              }
+            />
+          ) : null}
           <SettingsRow
             title={tx("settings.rows.jinaReader", "Jina reader")}
             description={tx("settings.help.jinaReader", "Use Jina Reader for web_fetch when available.")}

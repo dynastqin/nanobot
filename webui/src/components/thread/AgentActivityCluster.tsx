@@ -817,9 +817,10 @@ function traceLines(message: UIMessage): string[] {
 }
 
 function traceLabelColor(label: string): string {
+  if (label.startsWith("Searching")) {
+    return "text-violet-600 dark:text-violet-400";
+  }
   switch (label) {
-    case "Searching":
-      return "text-violet-600 dark:text-violet-400";
     case "Reading":
       return "text-emerald-600 dark:text-emerald-400";
     case "Command":
@@ -844,7 +845,7 @@ function ActivityTraceRow({
   evidence?: ActivityEvidence[];
   toolEvent?: ToolProgressEvent;
 }) {
-  const trace = describeTraceLine(line);
+  const trace = describeTraceLine(line, toolEvent);
   const Icon = trace.kind === "search"
     ? Search
     : trace.kind === "done"
@@ -855,15 +856,19 @@ function ActivityTraceRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const showDetails = toolEvent && hasToolCallDetails(toolEvent);
 
+  const labelNode = trace.provider
+    ? <>{trace.label}<span className="font-normal text-muted-foreground/55"> [{trace.provider}]</span></>
+    : trace.label;
+
   return (
     <ActivityStep
       as="li"
       marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={active} />}
       active={active && trace.kind !== "done"}
       tone={trace.kind === "done" ? "success" : active ? "active" : "neutral"}
-      label={trace.label}
+      label={labelNode}
       detail={trace.detail}
-      labelClassName={traceLabelColor(trace.label)}
+      labelClassName={traceLabelColor(trace.provider ? `Searching [${trace.provider}]` : trace.label)}
       onClick={showDetails ? () => setDetailsOpen(!detailsOpen) : undefined}
       aside={
         showDetails ? (
@@ -925,6 +930,7 @@ interface TraceDescription {
   detail: string;
   url?: string;
   host?: string;
+  provider?: string;
 }
 
 function TraceIconMark({
@@ -976,7 +982,13 @@ function TraceIconMark({
   );
 }
 
-function describeTraceLine(line: string): TraceDescription {
+function extractProviderFromResult(result: unknown): string | undefined {
+  if (typeof result !== "string") return undefined;
+  const match = /^\[provider:\s*([^\]]+)\]/.exec(result);
+  return match?.[1] || undefined;
+}
+
+function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDescription {
   const trimmed = line.trim();
   const functionMatch = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
   const name = functionMatch?.[1] ?? "";
@@ -986,7 +998,8 @@ function describeTraceLine(line: string): TraceDescription {
   const plainWebReadTrace =
     !!parsedUrl && /\b(fetch(?:ing|ed)?|read(?:ing)?|opened?|opening)\b/i.test(trimmed);
   if (/search/i.test(name)) {
-    return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed) };
+    const provider = extractProviderFromResult(toolEvent?.result);
+    return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed), provider };
   }
   if (/fetch|read|open/i.test(name) || plainWebReadTrace) {
     return {

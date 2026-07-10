@@ -81,6 +81,8 @@ function baseSettingsPayload() {
       base_url: null,
       max_results: 5,
       timeout: 30,
+      glm_search_engine: "search_std",
+      glm_search_intent: false,
       providers: [{ name: "duckduckgo", label: "DuckDuckGo", credential: "none" }],
     },
     web: {
@@ -1452,6 +1454,8 @@ describe("App layout", () => {
                 base_url: null,
                 max_results: 5,
                 timeout: 30,
+                glm_search_engine: "search_std",
+                glm_search_intent: false,
                 providers: [
                   { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
                   { name: "brave", label: "Brave Search", credential: "api_key" },
@@ -1788,6 +1792,8 @@ describe("App layout", () => {
                 base_url: null,
                 max_results: 5,
                 timeout: 30,
+                glm_search_engine: "search_std",
+                glm_search_intent: false,
                 providers: [
                   { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
                   { name: "brave", label: "Brave Search", credential: "api_key" },

@@ -7,6 +7,7 @@ import html
 import json
 import os
 import re
+import time
 from typing import Any, Callable
 from urllib.parse import quote, urljoin, urlparse
 
@@ -34,6 +35,7 @@ _VOLCENGINE_SEARCH_API_URL = "https://open.feedcoopapi.com/search_api/web_search
 _VOLCENGINE_TRAFFIC_TAG = "nanobot"
 _VOLCENGINE_TIME_RANGES = {"OneDay", "OneWeek", "OneMonth", "OneYear"}
 _VOLCENGINE_DATE_RANGE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$")
+_GLM_SEARCH_API_URL = "https://open.bigmodel.cn/api/paas/v4/web_search"
 
 
 class WebSearchConfig(Base):
@@ -43,6 +45,8 @@ class WebSearchConfig(Base):
     base_url: str = ""
     max_results: int = 5
     timeout: int = 30
+    glm_search_engine: str = "search_std"
+    glm_search_intent: bool = False
 
 
 class WebFetchConfig(Base):
@@ -320,6 +324,9 @@ class WebSearchTool(Tool):
             return "volcengine" if api_key else "duckduckgo"
         if provider == "keenable":
             return "keenable"
+        if provider == "glm":
+            api_key = self.config.api_key or os.environ.get("GLM_API_KEY", "")
+            return "glm" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -342,42 +349,52 @@ class WebSearchTool(Tool):
     ) -> str:
         self._refresh_config()
         provider = self.config.provider.strip().lower() or "brave"
+        effective_provider = self._effective_provider()
         n = min(max(count or self.config.max_results, 1), 10)
 
         if provider == "olostep":
-            return await self._search_olostep(query, n)
-        if provider == "volcengine":
-            return await self._search_volcengine(
+            result = await self._search_olostep(query, n)
+        elif provider == "volcengine":
+            result = await self._search_volcengine(
                 query,
                 n,
                 time_range=kwargs.get("timeRange", kwargs.get("time_range", time_range)),
                 auth_level=kwargs.get("authLevel", kwargs.get("auth_level", auth_level)),
                 query_rewrite=kwargs.get("queryRewrite", kwargs.get("query_rewrite", query_rewrite)),
             )
-        if provider == "duckduckgo":
-            return await self._search_duckduckgo(query, n)
+        elif provider == "duckduckgo":
+            result = await self._search_duckduckgo(query, n)
         elif provider == "tavily":
-            return await self._search_tavily(query, n)
+            result = await self._search_tavily(query, n)
         elif provider == "searxng":
-            return await self._search_searxng(query, n)
+            result = await self._search_searxng(query, n)
         elif provider == "jina":
-            return await self._search_jina(query, n)
+            result = await self._search_jina(query, n)
         elif provider == "brave":
-            return await self._search_brave(query, n)
+            result = await self._search_brave(query, n)
         elif provider == "kagi":
-            return await self._search_kagi(query, n)
+            result = await self._search_kagi(query, n)
         elif provider == "exa":
-            return await self._search_exa(query, n)
+            result = await self._search_exa(query, n)
         elif provider == "bocha":
-            return await self._search_bocha(
+            result = await self._search_bocha(
                 query,
                 n,
                 freshness=kwargs.get("freshness", "noLimit"),
             )
         elif provider == "keenable":
-            return await self._search_keenable(query, n)
+            result = await self._search_keenable(query, n)
+        elif provider == "glm":
+            result = await self._search_glm(
+                query, n,
+                content_size=kwargs.get("content_size", "medium"),
+                search_engine=kwargs.get("glm_search_engine"),
+                search_intent=kwargs.get("glm_search_intent"),
+            )
         else:
             return f"Error: unknown search provider '{provider}'"
+
+        return f"[provider: {effective_provider}]\n{result}"
 
     async def _search_olostep(self, query: str, n: int) -> str:
         try:
@@ -824,6 +841,71 @@ class WebSearchTool(Tool):
             return f"Error: Bocha search HTTP {e.response.status_code}: {e.response.text[:200]}"
         except Exception as e:
             return f"Error: {e}"
+
+    async def _search_glm(
+        self,
+        query: str,
+        n: int,
+        content_size: str = "medium",
+        search_engine: str | None = None,
+        search_intent: bool | None = None,
+    ) -> str:
+        api_key = self.config.api_key or os.environ.get("GLM_API_KEY", "")
+        if not api_key:
+            logger.warning("GLM_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        engine = search_engine or self.config.glm_search_engine or "search_std"
+        intent = search_intent if search_intent is not None else self.config.glm_search_intent
+        try:
+            endpoint = self.config.base_url or _GLM_SEARCH_API_URL
+            body = {
+                "search_query": query,
+                "search_engine": engine,
+                "count": n,
+                "content_size": content_size,
+                "search_intent": intent,
+            }
+            logger.info("GLM search request url={} body={}", endpoint, body)
+            t0 = time.monotonic()
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    endpoint,
+                    headers=headers,
+                    json=body,
+                    timeout=float(self.config.timeout),
+                )
+                elapsed = time.monotonic() - t0
+                if r.status_code == 429:
+                    return "Error: GLM search rate limited (HTTP 429). Wait and retry."
+                r.raise_for_status()
+            raw_text = r.text
+            body_snippet = raw_text if len(raw_text) <= 500 else raw_text[:500] + "..."
+            logger.info(
+                "GLM search response status={} elapsed={:.2f}s body={}",
+                r.status_code, elapsed, body_snippet,
+            )
+            data = r.json()
+            result_items = data.get("search_result") if isinstance(data, dict) else []
+            if not isinstance(result_items, list):
+                result_items = []
+            items = [
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("link", ""),
+                    "content": item.get("content", ""),
+                }
+                for item in result_items
+                if isinstance(item, dict)
+            ]
+            return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            return f"Error: GLM search HTTP {e.response.status_code}: {e.response.text[:200]}"
+        except Exception as e:
+            return f"Error: GLM search failed: {e}"
 
 
 @tool_parameters(

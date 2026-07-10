@@ -49,6 +49,8 @@ function settingsPayload(): SettingsPayload {
       base_url: null,
       max_results: 5,
       timeout: 30,
+      glm_search_engine: "search_std",
+      glm_search_intent: false,
       providers: [{ name: "duckduckgo", label: "DuckDuckGo", credential: "none" }],
     },
     web: {
@@ -944,7 +946,7 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
       if (
         url ===
-        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true"
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true&glm_search_engine=search_std&glm_search_intent=false"
       ) {
         return jsonResponse(updatedPayload);
       }
@@ -964,7 +966,7 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true",
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true&glm_search_engine=search_std&glm_search_intent=false",
         expect.objectContaining({
           headers: { Authorization: "Bearer tok" },
         }),
