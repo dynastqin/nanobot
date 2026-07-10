@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -192,36 +191,13 @@ def _webui_activity_signature(session_key: str) -> dict[str, int]:
     }
 
 
-def _webui_activity_updated_at(signature: dict[str, int]) -> str | None:
-    mtime_ns = signature.get(_WEBUI_ACTIVITY_MTIME_NS, 0)
-    if mtime_ns <= 0:
-        return None
-    return datetime.fromtimestamp(mtime_ns / 1_000_000_000).isoformat()
-
-
-def _timestamp(value: str | None) -> float:
-    if not value:
-        return 0.0
-    try:
-        return datetime.fromisoformat(value).timestamp()
-    except ValueError:
-        return 0.0
-
-
-def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
-    if _timestamp(activity) > _timestamp(stored):
-        return activity
-    return stored
-
-
 def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
     signature = _file_signature(path)
     activity_signature = _webui_activity_signature(session.key)
-    activity_updated_at = _webui_activity_updated_at(activity_signature)
     return {
         "key": session.key,
         "created_at": session.created_at.isoformat(),
-        "updated_at": _latest_updated_at(session.updated_at.isoformat(), activity_updated_at),
+        "updated_at": session.updated_at.isoformat(),
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         "file": path.name,
@@ -271,11 +247,10 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
             signature = _file_signature(path)
             key = data.get("key") or fallback_key
             activity_signature = _webui_activity_signature(key)
-            activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
                 "key": key,
                 "created_at": data.get("created_at"),
-                "updated_at": _latest_updated_at(data.get("updated_at"), activity_updated_at),
+                "updated_at": data.get("updated_at"),
                 "title": _metadata_title(data.get("metadata", {})),
                 "preview": preview or fallback_preview,
                 "file": path.name,

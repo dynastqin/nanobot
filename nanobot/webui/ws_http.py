@@ -441,11 +441,16 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         scope = self.workspaces.scope_for_session_key(decoded_key)
         session_messages: list[dict[str, Any]] | None = None
+        session_created_at: str | None = None
         if self.session_manager is not None:
             session_data = self.session_manager.read_session_file(decoded_key)
-            raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
-            if isinstance(raw_messages, list):
-                session_messages = [m for m in raw_messages if isinstance(m, dict)]
+            if isinstance(session_data, dict):
+                raw_messages = session_data.get("messages")
+                if isinstance(raw_messages, list):
+                    session_messages = [m for m in raw_messages if isinstance(m, dict)]
+                created = session_data.get("created_at")
+                if isinstance(created, str):
+                    session_created_at = created
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -467,6 +472,7 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages=session_messages,
+            session_created_at=session_created_at,
             limit=limit,
             direction=direction,
             before=before,

@@ -10,6 +10,7 @@ import re
 import shutil
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple
 from urllib.parse import unquote, urlparse
@@ -1197,12 +1198,22 @@ def _media_from_signed_urls(value: Any) -> list[dict[str, Any]]:
     return media
 
 
+def _parse_iso_to_timestamp(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def replay_transcript_to_ui_messages(
     lines: list[dict[str, Any]],
     *,
     augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
+    replay_base_ts: float | None = None,
 ) -> list[dict[str, Any]]:
     """Fold JSONL records into ``UIMessage``-shaped dicts for the WebUI.
 
@@ -1219,7 +1230,7 @@ def replay_transcript_to_ui_messages(
     active_activity_segment_id: str | None = None
     active_file_edit_segment_id: str | None = None
     activity_segment_counter = 0
-    _ts_base = int(time.time() * 1000)
+    _ts_base = int((replay_base_ts if replay_base_ts is not None else time.time()) * 1000)
     closed_turn_ids: set[str] = set()
     replay_turn_aliases: dict[str, str] = {}
 
@@ -1855,6 +1866,7 @@ def build_webui_thread_response(
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
     session_messages: list[dict[str, Any]] | None = None,
+    session_created_at: str | None = None,
     limit: int | None = None,
     direction: str | None = None,
     before: str | None = None,
@@ -1870,11 +1882,13 @@ def build_webui_thread_response(
         return None
     lines = inject_missing_user_events_from_session(session_key, lines, session_messages)
     fork_boundary = fork_boundary_message_count(lines)
+    replay_base_ts = _parse_iso_to_timestamp(session_created_at) if session_created_at else None
     msgs = replay_transcript_to_ui_messages(
         lines,
         augment_user_media=augment_user_media,
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
+        replay_base_ts=replay_base_ts,
     )
     payload = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,

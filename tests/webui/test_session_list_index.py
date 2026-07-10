@@ -122,10 +122,10 @@ def test_webui_session_list_uses_webui_transcript_activity_for_sort(
     rows = list_webui_sessions(manager)
 
     assert [row["key"] for row in rows] == [
-        "websocket:old-metadata",
         "websocket:newer-metadata",
+        "websocket:old-metadata",
     ]
-    assert rows[0]["updated_at"].startswith("2026-06-15T12:00:00")
+    assert rows[0]["updated_at"].startswith("2026-06-15T11:00:00")
 
 
 def test_webui_session_list_rescans_when_transcript_changes(
@@ -166,7 +166,7 @@ def test_webui_session_list_rescans_when_transcript_changes(
     rows = list_webui_sessions(manager)
 
     assert scanned == [manager._get_session_path("websocket:transcript-change").name]
-    assert rows[0]["updated_at"].startswith("2026-06-15T12:30:00")
+    assert rows[0]["updated_at"].startswith("2026-06-15T10:00:00")
 
 
 def list_webui_sessions(manager: SessionManager) -> list[dict]:
