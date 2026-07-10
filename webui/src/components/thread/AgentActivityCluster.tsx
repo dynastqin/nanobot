@@ -21,6 +21,7 @@ import { ActivityEvidencePreview } from "@/components/thread/activity/ActivityEv
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { DiffPair } from "@/components/thread/activity/DiffPair";
 import { FileEditGroup, hasVisibleDiffStats, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
+import { SkillLoadRow } from "@/components/thread/activity/SkillLoadRow";
 import {
   activityEvidenceFromMessageMedia,
   activityEvidenceFromToolEvent,
@@ -29,7 +30,7 @@ import {
   type ActivityEvidence,
 } from "@/lib/activity-timeline";
 import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
-import { formatToolCallTrace } from "@/lib/tool-traces";
+import { extractSkillName, formatToolCallTrace, isSkillLoadEvent } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
 import { hasToolCallDetails, ToolCallDetailContent } from "@/components/thread/activity/ToolCallDetail";
 import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
@@ -274,6 +275,24 @@ export function TraceActivityCard({
   };
 
   lines.forEach((line, index) => {
+    const toolEvent = eventByLine.get(line);
+
+    if (toolEvent && isSkillLoadEvent(toolEvent)) {
+      flushNormalLines(String(index));
+      const skillName = extractSkillName(toolEvent)!;
+      items.push(
+        <ul key={`${message.id}:skill:${skillName}:${index}`} className="space-y-1">
+          <SkillLoadRow
+            name={skillName}
+            active={active}
+            phase={toolEvent.phase}
+            toolEvent={toolEvent}
+          />
+        </ul>,
+      );
+      return;
+    }
+
     const cliRun = cliRunsByLine.get(line) ?? parseCliRunTrace(line);
     if (cliRun) {
       flushNormalLines(String(index));
@@ -369,6 +388,7 @@ interface ActivityCounts {
   toolCalls: number;
   cliCount: number;
   mcpCount: number;
+  skillCount: number;
   fileCount: number;
   added: number;
   deleted: number;
@@ -417,6 +437,7 @@ function countActivity(
 ): ActivityCounts {
   let reasoningSteps = 0;
   let toolCalls = 0;
+  let skillCount = 0;
   const cliCount = cliRuns.length;
   const mcpCount = mcpRuns.length;
   const primaryCli = cliRuns[cliRuns.length - 1];
@@ -430,9 +451,19 @@ function countActivity(
     }
     if (m.kind === "trace") {
       const lines = traceLines(m);
+      const skillEventNames = new Set(
+        (m.toolEvents ?? [])
+          .filter((e) => isSkillLoadEvent(e))
+          .map((e) => formatToolCallTrace(e))
+          .filter(Boolean),
+      );
       for (const line of lines) {
         if (!isCliRunTraceLine(line) && !isMcpRunTraceLine(line)) {
-          toolCalls += 1;
+          if (skillEventNames.has(line)) {
+            skillCount += 1;
+          } else {
+            toolCalls += 1;
+          }
         }
       }
     }
@@ -476,6 +507,7 @@ function countActivity(
     toolCalls,
     cliCount,
     mcpCount,
+    skillCount,
     fileCount: fileEdits.length,
     added,
     deleted,
@@ -540,6 +572,7 @@ export function AgentActivityCluster({
     || counts.toolCalls > 0
     || counts.cliCount > 0
     || counts.mcpCount > 0
+    || counts.skillCount > 0
     || counts.fileCount > 0;
   const hasOnlyFileActivity = fileEdits.length > 0 && messages.every(messageHasOnlyFileActivity);
 

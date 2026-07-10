@@ -219,6 +219,7 @@ export interface ToolProgressEvent {
   error?: unknown;
   files?: unknown[];
   embeds?: unknown[];
+  skill_load?: { name: string };
 }
 
 export interface UIFileEdit {

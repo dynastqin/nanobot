@@ -1,9 +1,9 @@
 import { toMediaAttachment } from "@/lib/media";
 import type { ToolProgressEvent, UIMediaAttachment, UIMessage } from "@/lib/types";
 
-export type ActivityItemType = "reasoning" | "tool" | "cli" | "mcp" | "file_edit" | "media";
+export type ActivityItemType = "reasoning" | "tool" | "cli" | "mcp" | "file_edit" | "media" | "skill_load";
 export type ActivityStepStatus = "pending" | "running" | "done" | "error";
-export type ActivityStepSource = "reasoning" | "tool" | "web" | "browser" | "shell" | "mcp" | "file" | "media";
+export type ActivityStepSource = "reasoning" | "tool" | "web" | "browser" | "shell" | "mcp" | "file" | "media" | "skill";
 
 export interface ActivityItem {
   type: ActivityItemType;
@@ -290,7 +290,9 @@ function activityItemsForMessage(message: UIMessage): ActivityItem[] {
   }
   for (const event of message.toolEvents ?? []) {
     const name = String(event.name ?? "").toLowerCase();
-    if (name === "run_cli_app") {
+    if (event.skill_load?.name) {
+      items.push({ type: "skill_load", message });
+    } else if (name === "run_cli_app") {
       items.push({ type: "cli", message });
     } else if (name === "mcp") {
       items.push({ type: "mcp", message });

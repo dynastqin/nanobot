@@ -122,6 +122,14 @@ export function findToolEventForLine(
   return undefined;
 }
 
+export function isSkillLoadEvent(event: ToolProgressEvent): boolean {
+  return !!(event.skill_load?.name);
+}
+
+export function extractSkillName(event: ToolProgressEvent): string | null {
+  return event.skill_load?.name ?? null;
+}
+
 export function mergeUniqueToolTraceLines(
   previousTraces: string[],
   lines: string[],

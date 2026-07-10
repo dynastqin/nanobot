@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
@@ -17,6 +18,8 @@ from nanobot.utils.progress_events import (
     on_progress_accepts_tool_events,
 )
 from nanobot.utils.tool_hints import format_tool_hints
+
+_SKILL_MD_RE = re.compile(r"(?:^|[\\/])skills[\\/]([^\\/]+)[\\/]SKILL\.md$")
 
 
 class AgentProgressHook(AgentHook):
@@ -75,6 +78,22 @@ class AgentProgressHook(AgentHook):
             return True
         return name in sig.parameters
 
+    @staticmethod
+    def _extract_skill_load(tool_call: Any) -> dict[str, str] | None:
+        name = getattr(tool_call, "name", "")
+        if name not in ("read_file", "read"):
+            return None
+        arguments = getattr(tool_call, "arguments", {}) or {}
+        if not isinstance(arguments, dict):
+            return None
+        path = arguments.get("path", "")
+        if not isinstance(path, str):
+            return None
+        m = _SKILL_MD_RE.search(path)
+        if not m:
+            return None
+        return {"name": m.group(1)}
+
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         prev_clean = strip_think(self._stream_buf)
         self._stream_buf += delta
@@ -115,6 +134,10 @@ class AgentProgressHook(AgentHook):
                     await self._on_progress(thought)
             tool_hint = self._strip_think(self._tool_hint(context.tool_calls))
             tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
+            for tc, event in zip(context.tool_calls, tool_events):
+                skill_load = self._extract_skill_load(tc)
+                if skill_load:
+                    event["skill_load"] = skill_load
             await invoke_on_progress(
                 self._on_progress,
                 tool_hint,
@@ -160,6 +183,10 @@ class AgentProgressHook(AgentHook):
         ):
             tool_events = build_tool_event_finish_payloads(context)
             if tool_events:
+                for tc, event in zip(context.tool_calls, tool_events):
+                    skill_load = self._extract_skill_load(tc)
+                    if skill_load:
+                        event["skill_load"] = skill_load
                 await invoke_on_progress(
                     self._on_progress,
                     "",
