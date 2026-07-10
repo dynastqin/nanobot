@@ -8,7 +8,7 @@
 .orion
 
 # Claude / AI assistant artifacts
-.mcp.json
+.claude/settings.json
 docs/superpowers/
 docs/plans/
 

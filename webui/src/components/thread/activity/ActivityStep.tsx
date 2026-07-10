@@ -20,7 +20,9 @@ export interface ActivityStepProps {
   className?: string;
   contentClassName?: string;
   markerClassName?: string;
+  labelClassName?: string;
   style?: CSSProperties;
+  onClick?: () => void;
 }
 
 export function ActivityStep({
@@ -37,7 +39,9 @@ export function ActivityStep({
   className,
   contentClassName,
   markerClassName,
+  labelClassName,
   style,
+  onClick,
 }: ActivityStepProps) {
   return (
     <Component
@@ -71,18 +75,27 @@ export function ActivityStep({
         )}
       </span>
       <div className={cn("min-w-0", contentClassName)}>
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <StreamingLabelSheen
-            active={active}
-            className={cn(
-              "min-w-0 shrink-0 font-medium",
-              tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
-            )}
-          >
-            {label}
-          </StreamingLabelSheen>
+        <div
+          className={cn("flex min-w-0 items-baseline gap-1.5 activity-detail-row", onClick && "cursor-pointer")}
+          onClick={onClick}
+        >
+          {labelClassName ? (
+            <span className={cn("shrink-0 font-medium leading-normal py-px", labelClassName)}>
+              {label}
+            </span>
+          ) : (
+            <StreamingLabelSheen
+              active={active}
+              className={cn(
+                "min-w-0 font-medium",
+                tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
+              )}
+            >
+              {label}
+            </StreamingLabelSheen>
+          )}
           {detail ? (
-            <span className="min-w-0 break-words text-foreground/82">
+            <span className="min-w-0 break-words text-foreground/82 activity-detail-text">
               {detail}
             </span>
           ) : null}

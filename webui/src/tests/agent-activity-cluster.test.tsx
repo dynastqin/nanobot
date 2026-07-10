@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { AgentActivityCluster, groupActivityMessages, groupActivityRounds, ReasoningBlock, TraceActivityCard } from "@/components/thread/AgentActivityCluster";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 const BLENDER_CLI_APP: CliAppInfo = {
@@ -65,407 +65,428 @@ function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage
   return rows;
 }
 
-function installAnimationFrameQueue() {
-  const originalRequest = window.requestAnimationFrame;
-  const originalCancel = window.cancelAnimationFrame;
-  const callbacks = new Map<number, FrameRequestCallback>();
-  let nextId = 1;
-
-  window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-    const id = nextId;
-    nextId += 1;
-    callbacks.set(id, callback);
-    return id;
-  }) as typeof window.requestAnimationFrame;
-  window.cancelAnimationFrame = ((id: number) => {
-    callbacks.delete(id);
-  }) as typeof window.cancelAnimationFrame;
-
-  return {
-    flush() {
-      const pending = Array.from(callbacks.entries());
-      callbacks.clear();
-      for (const [, callback] of pending) callback(0);
-    },
-    restore() {
-      window.requestAnimationFrame = originalRequest;
-      window.cancelAnimationFrame = originalCancel;
-    },
-  };
-}
-
-function setScrollGeometry(
-  element: HTMLElement,
-  geometry: { scrollHeight: number; clientHeight: number; scrollTop?: number },
-) {
-  Object.defineProperties(element, {
-    scrollHeight: { configurable: true, value: geometry.scrollHeight },
-    clientHeight: { configurable: true, value: geometry.clientHeight },
-    scrollTop: {
-      configurable: true,
-      value: geometry.scrollTop ?? element.scrollTop,
-      writable: true,
-    },
-  });
-}
-
-function installReducedMotion() {
-  const original = window.matchMedia;
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    value: () => ({
-      matches: true,
-      media: "(prefers-reduced-motion: reduce)",
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-  return () => {
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      value: original,
-    });
-  };
-}
-
-describe("AgentActivityCluster", () => {
-  it("jumps to the latest activity when opened", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(880);
-    } finally {
-      raf.restore();
-    }
+describe("groupActivityMessages", () => {
+  it("merges consecutive reasoning messages into one group", () => {
+    const messages: UIMessage[] = [
+      { id: "r1", role: "assistant", content: "", reasoning: "a", createdAt: 1 },
+      { id: "r2", role: "assistant", content: "", reasoning: "b", createdAt: 2 },
+      { id: "r3", role: "assistant", content: "", reasoning: "c", createdAt: 3 },
+    ];
+    const groups = groupActivityMessages(messages);
+    expect(groups).toEqual([{ kind: "reasoning", messages }]);
   });
 
-  it("follows new reasoning and tool activity while the user is at the bottom", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" with more detail", {
-            id: "t2",
-            role: "tool",
-            kind: "trace",
-            content: "open_browser()",
-            traces: ["open_browser()"],
-            createdAt: 3,
-          })}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(1380);
-    } finally {
-      raf.restore();
-    }
+  it("splits reasoning groups when a trace is between them", () => {
+    const r1: UIMessage = { id: "r1", role: "assistant", content: "", reasoning: "a", createdAt: 1 };
+    const t1: UIMessage = { id: "t1", role: "tool", kind: "trace", content: "search()", traces: ["search()"], createdAt: 2 };
+    const r2: UIMessage = { id: "r2", role: "assistant", content: "", reasoning: "b", createdAt: 3 };
+    const groups = groupActivityMessages([r1, t1, r2]);
+    expect(groups).toEqual([
+      { kind: "reasoning", messages: [r1] },
+      { kind: "trace", message: t1 },
+      { kind: "reasoning", messages: [r2] },
+    ]);
   });
 
-  it("does not pull the user down after they scroll up inside the activity pane", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      scrollport.scrollTop = 100;
-      fireEvent.scroll(scrollport);
-
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" still streaming")}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(100);
-    } finally {
-      raf.restore();
-    }
+  it("produces alternating groups for interspersed reasoning and traces", () => {
+    const r1: UIMessage = { id: "r1", role: "assistant", content: "", reasoning: "a", createdAt: 1 };
+    const t1: UIMessage = { id: "t1", role: "tool", kind: "trace", content: "x()", traces: ["x()"], createdAt: 2 };
+    const r2: UIMessage = { id: "r2", role: "assistant", content: "", reasoning: "b", createdAt: 3 };
+    const t2: UIMessage = { id: "t2", role: "tool", kind: "trace", content: "y()", traces: ["y()"], createdAt: 4 };
+    const r3: UIMessage = { id: "r3", role: "assistant", content: "", reasoning: "c", createdAt: 5 };
+    const groups = groupActivityMessages([r1, t1, r2, t2, r3]);
+    expect(groups).toHaveLength(5);
+    expect(groups.map((g) => g.kind)).toEqual(["reasoning", "trace", "reasoning", "trace", "reasoning"]);
   });
 
-  it("turns the live reasoning marker into an animated check when thinking completes", async () => {
-    const liveReasoning: UIMessage = {
-      id: "r-check",
-      role: "assistant",
-      content: "",
-      reasoning: "checking a source",
-      reasoningStreaming: true,
-      isStreaming: true,
-      createdAt: 1,
-    };
-    const { rerender } = render(
-      <AgentActivityCluster
-        messages={[liveReasoning]}
-        isTurnStreaming
-        hasBodyBelow
+  it("returns an empty array for no messages", () => {
+    expect(groupActivityMessages([])).toEqual([]);
+  });
+
+  it("ignores non-activity messages", () => {
+    const r1: UIMessage = { id: "r1", role: "assistant", content: "answer", createdAt: 1 };
+    const t1: UIMessage = { id: "t1", role: "tool", kind: "trace", content: "x()", traces: ["x()"], createdAt: 2 };
+    const groups = groupActivityMessages([r1, t1]);
+    expect(groups).toEqual([{ kind: "trace", message: t1 }]);
+  });
+});
+
+describe("groupActivityRounds", () => {
+  const r1: UIMessage = { id: "r1", role: "assistant", content: "", reasoning: "a", createdAt: 1 };
+  const t1: UIMessage = { id: "t1", role: "tool", kind: "trace", content: "x()", traces: ["x()"], createdAt: 2 };
+  const r2: UIMessage = { id: "r2", role: "assistant", content: "", reasoning: "b", createdAt: 3 };
+  const t2: UIMessage = { id: "t2", role: "tool", kind: "trace", content: "y()", traces: ["y()"], createdAt: 4 };
+
+  it("groups reasoning + traces into a round", () => {
+    const groups = groupActivityMessages([r1, t1]);
+    const rounds = groupActivityRounds(groups);
+    expect(rounds).toEqual([
+      { reasoning: { kind: "reasoning", messages: [r1] }, traces: [{ kind: "trace", message: t1 }] },
+    ]);
+  });
+
+  it("splits at each reasoning block to start a new round", () => {
+    const groups = groupActivityMessages([r1, t1, r2, t2]);
+    const rounds = groupActivityRounds(groups);
+    expect(rounds).toEqual([
+      { reasoning: { kind: "reasoning", messages: [r1] }, traces: [{ kind: "trace", message: t1 }] },
+      { reasoning: { kind: "reasoning", messages: [r2] }, traces: [{ kind: "trace", message: t2 }] },
+    ]);
+  });
+
+  it("creates a round without reasoning when traces appear first", () => {
+    const groups = groupActivityMessages([t1, r1]);
+    const rounds = groupActivityRounds(groups);
+    expect(rounds).toEqual([
+      { traces: [{ kind: "trace", message: t1 }] },
+      { reasoning: { kind: "reasoning", messages: [r1] }, traces: [] },
+    ]);
+  });
+
+  it("handles reasoning-only (no traces)", () => {
+    const groups = groupActivityMessages([r1]);
+    const rounds = groupActivityRounds(groups);
+    expect(rounds).toEqual([
+      { reasoning: { kind: "reasoning", messages: [r1] }, traces: [] },
+    ]);
+  });
+
+  it("handles trace-only (no reasoning)", () => {
+    const groups = groupActivityMessages([t1, t2]);
+    const rounds = groupActivityRounds(groups);
+    expect(rounds).toEqual([
+      { traces: [{ kind: "trace", message: t1 }, { kind: "trace", message: t2 }] },
+    ]);
+  });
+
+  it("returns empty array for empty groups", () => {
+    expect(groupActivityRounds([])).toEqual([]);
+  });
+
+  it("handles reasoning, trace, reasoning pattern", () => {
+    const groups = groupActivityMessages([r1, t1, r2]);
+    const rounds = groupActivityRounds(groups);
+    expect(rounds).toEqual([
+      { reasoning: { kind: "reasoning", messages: [r1] }, traces: [{ kind: "trace", message: t1 }] },
+      { reasoning: { kind: "reasoning", messages: [r2] }, traces: [] },
+    ]);
+  });
+});
+
+describe("ReasoningBlock", () => {
+  it("expands while streaming and is the last block", () => {
+    const messages: UIMessage[] = [
+      { id: "r1", role: "assistant", content: "", reasoning: "thinking...", reasoningStreaming: true, isStreaming: true, createdAt: 1 },
+    ];
+    render(
+      <ReasoningBlock
+        messages={messages}
+        streaming
+        isLast
+        hasBodyBelow={false}
       />,
     );
+    expect(screen.getAllByText(/thinking/i).length).toBeGreaterThan(0);
+    // Expanded means body content is shown
+    expect(screen.getByText("thinking...")).toBeInTheDocument();
+  });
 
-    expect(screen.getByTestId("activity-reasoning-marker")).toHaveAttribute("data-state", "thinking");
+  it("auto-collapses when streaming ends and isLast becomes false", () => {
+    const messages: UIMessage[] = [
+      { id: "r1", role: "assistant", content: "", reasoning: "secret thought", createdAt: 1 },
+    ];
+    const { rerender } = render(
+      <ReasoningBlock messages={messages} streaming isLast hasBodyBelow={false} />,
+    );
+    expect(screen.getByText("secret thought")).toBeInTheDocument();
 
     rerender(
-      <AgentActivityCluster
-        messages={[{
-          ...liveReasoning,
-          reasoningStreaming: false,
-          isStreaming: false,
-        }]}
-        isTurnStreaming={false}
-        hasBodyBelow
-      />,
+      <ReasoningBlock messages={messages} streaming={false} isLast={false} hasBodyBelow={false} />,
     );
-
-    const marker = screen.getByTestId("activity-reasoning-marker");
-    expect(marker).toHaveAttribute("data-state", "done");
-    expect(marker.querySelector("svg")).toBeInTheDocument();
-    await waitFor(() => expect(marker).toHaveClass("animate-in"));
+    expect(screen.queryByText("secret thought")).not.toBeInTheDocument();
   });
 
-  it("briefly shows completed activity, then auto-collapses before the answer", () => {
+  it("hold-opens for 900ms when streaming ends on the last block", () => {
     vi.useFakeTimers();
-    const liveReasoning: UIMessage = {
-      id: "r-collapse",
-      role: "assistant",
-      content: "",
-      reasoning: "checking files",
-      reasoningStreaming: true,
-      isStreaming: true,
-      createdAt: 1,
-    };
     try {
+      const messages: UIMessage[] = [
+        { id: "r1", role: "assistant", content: "", reasoning: "final thought", reasoningStreaming: true, isStreaming: true, createdAt: 1 },
+      ];
       const { rerender } = render(
-        <AgentActivityCluster
-          messages={[liveReasoning]}
-          isTurnStreaming
-          hasBodyBelow
-        />,
+        <ReasoningBlock messages={messages} streaming isLast hasBodyBelow={false} />,
       );
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      expect(screen.getByText("final thought")).toBeInTheDocument();
 
       rerender(
-        <AgentActivityCluster
-          messages={[{
-            ...liveReasoning,
-            reasoningStreaming: false,
-            isStreaming: false,
-          }]}
-          isTurnStreaming={false}
-          hasBodyBelow
-        />,
+        <ReasoningBlock messages={messages} streaming={false} isLast hasBodyBelow={false} />,
       );
+      // Still open during hold
+      expect(screen.getByText("final thought")).toBeInTheDocument();
 
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
-      act(() => {
-        vi.advanceTimersByTime(901);
-      });
-      expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /1 steps/i })).toHaveAttribute(
-        "aria-expanded",
-        "false",
-      );
+      act(() => { vi.advanceTimersByTime(901); });
+      expect(screen.queryByText("final thought")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("uses persisted turn latency for completed history instead of replay timestamps", () => {
+  it("user click toggles open state and overrides auto", () => {
+    const messages: UIMessage[] = [
+      { id: "r1", role: "assistant", content: "", reasoning: "past thought", createdAt: 1 },
+    ];
     render(
-      <AgentActivityCluster
-        messages={[{
-          id: "r-history",
-          role: "assistant",
-          content: "",
-          reasoning: "historical thought",
-          createdAt: 1,
-        }]}
-        isTurnStreaming={false}
-        hasBodyBelow
-        turnLatencyMs={12_400}
-      />,
+      <ReasoningBlock messages={messages} streaming={false} isLast={false} hasBodyBelow={false} />,
     );
+    // Initially collapsed (not streaming, not last)
+    expect(screen.queryByText("past thought")).not.toBeInTheDocument();
 
-    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /thought/i }));
+    expect(screen.getByText("past thought")).toBeInTheDocument();
+
+    // Click again to collapse
+    fireEvent.click(screen.getByRole("button", { name: /thought/i }));
+    expect(screen.queryByText("past thought")).not.toBeInTheDocument();
   });
 
-  it("labels mixed tool activity as work instead of thought", () => {
+  it("shows duration label when messages have valid timestamps", () => {
+    const messages: UIMessage[] = [
+      { id: "r1", role: "assistant", content: "", reasoning: "a", createdAt: 1_000 },
+      { id: "r2", role: "assistant", content: "", reasoning: "b", createdAt: 5_000 },
+    ];
     render(
-      <AgentActivityCluster
-        messages={activityMessages()}
-        isTurnStreaming={false}
-        hasBodyBelow
-        turnLatencyMs={12_400}
-      />,
+      <ReasoningBlock messages={messages} streaming={false} isLast hasBodyBelow={false} />,
     );
-
-    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 12s")).not.toBeInTheDocument();
+    // 4s duration between createdAt 1000 and 5000
+    expect(screen.getByText(/thought for 4s/i)).toBeInTheDocument();
   });
 
-  it("omits the duration when completed history has no reliable timing", () => {
+  it("shows plain 'Thought' when duration rounds to zero", () => {
+    const messages: UIMessage[] = [
+      { id: "r1", role: "assistant", content: "", reasoning: "instant", createdAt: 1_000 },
+    ];
+    render(
+      <ReasoningBlock messages={messages} streaming={false} isLast hasBodyBelow={false} />,
+    );
+    expect(screen.getByText(/^thought$/i)).toBeInTheDocument();
+  });
+});
+
+describe("TraceActivityCard", () => {
+  it("renders a tool call row with expandable details", () => {
+    const message: UIMessage = {
+      id: "t1",
+      role: "tool",
+      kind: "trace",
+      content: 'search({"query":"x"})',
+      traces: ['search({"query":"x"})'],
+      toolEvents: [{
+        phase: "end",
+        call_id: "call-search",
+        name: "search",
+        arguments: { query: "x" },
+        result: { hits: 3 },
+      }],
+      createdAt: 1,
+    };
+    render(
+      <TraceActivityCard
+        message={message}
+        active={false}
+        cliAppsByName={new Map()}
+        mcpPresetsByName={new Map()}
+      />,
+    );
+    // Tool call row visible
+    expect(screen.getByText("Searching")).toBeInTheDocument();
+    // ToolCallDetail toggle visible
+    expect(screen.getByRole("button", { name: /show details/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /show details/i }));
+    expect(screen.getByText("Arguments")).toBeInTheDocument();
+    expect(screen.getByText("Result")).toBeInTheDocument();
+  });
+
+  it("renders CLI app runs with brand logo", () => {
+    const line = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
+    const message: UIMessage = {
+      id: "t-cli",
+      role: "tool",
+      kind: "trace",
+      content: line,
+      traces: [line],
+      createdAt: 1,
+    };
+    render(
+      <TraceActivityCard
+        message={message}
+        active
+        cliAppsByName={new Map([["blender", BLENDER_CLI_APP]])}
+        mcpPresetsByName={new Map()}
+      />,
+    );
+    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("@blender");
+    expect(screen.getByTestId("activity-cli-logo-blender")).toBeInTheDocument();
+  });
+
+  it("renders MCP preset runs with brand logo", () => {
+    const line = 'mcp_browserbase_navigate({"url":"https://example.com"})';
+    const message: UIMessage = {
+      id: "t-mcp",
+      role: "tool",
+      kind: "trace",
+      content: line,
+      traces: [line],
+      toolEvents: [{
+        phase: "end",
+        call_id: "call-mcp",
+        name: "mcp_browserbase_navigate",
+        arguments: { url: "https://example.com" },
+      }],
+      createdAt: 1,
+    };
+    render(
+      <TraceActivityCard
+        message={message}
+        active={false}
+        cliAppsByName={new Map()}
+        mcpPresetsByName={new Map([["browserbase", BROWSERBASE_MCP]])}
+      />,
+    );
+    expect(screen.getByTestId("activity-mcp-runs")).toHaveTextContent("Browserbase");
+  });
+
+  it("returns null for an empty trace message", () => {
+    const message: UIMessage = {
+      id: "t-empty",
+      role: "tool",
+      kind: "trace",
+      content: "",
+      traces: [],
+      createdAt: 1,
+    };
+    const { container } = render(
+      <TraceActivityCard
+        message={message}
+        active={false}
+        cliAppsByName={new Map()}
+        mcpPresetsByName={new Map()}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("AgentActivityCluster", () => {
+  it("renders interleaved reasoning blocks and trace cards in order", () => {
+    const r1: UIMessage = { id: "r1", role: "assistant", content: "", reasoning: "first", createdAt: 1 };
+    const t1: UIMessage = { id: "t1", role: "tool", kind: "trace", content: "search()", traces: ["search()"], createdAt: 2 };
+    const r2: UIMessage = { id: "r2", role: "assistant", content: "", reasoning: "second", createdAt: 3 };
+    const t2: UIMessage = { id: "t2", role: "tool", kind: "trace", content: "edit()", traces: ["edit()"], createdAt: 4 };
     render(
       <AgentActivityCluster
-        messages={[{
-          id: "r-old-history",
-          role: "assistant",
-          content: "",
-          reasoning: "old historical thought",
-          createdAt: 1,
-        }]}
+        messages={[r1, t1, r2, t2]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    const thoughtLabels = screen.getAllByText(/^thought$/i);
+    expect(thoughtLabels.length).toBe(2);
+    expect(screen.getByText("Searching")).toBeInTheDocument();
+  });
+
+  it("renders a single Thought block when only reasoning is present", () => {
+    render(
+      <AgentActivityCluster
+        messages={[
+          { id: "r1", role: "assistant", content: "", reasoning: "alone", createdAt: 1 },
+        ]}
         isTurnStreaming={false}
         hasBodyBelow
       />,
     );
-
-    expect(screen.getByText("Thought")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^thought$/i).length).toBe(1);
   });
 
-  it("renders file edit totals and a compact expanded file list", async () => {
-    const restoreMotion = installReducedMotion();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages("", {
-            id: "t2",
-            role: "tool",
-            kind: "trace",
+  it("renders trace cards without any Thought block when only tools are present", () => {
+    render(
+      <AgentActivityCluster
+        messages={[
+          { id: "t1", role: "tool", kind: "trace", content: "search()", traces: ["search()"], createdAt: 1 },
+        ]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+    expect(screen.queryByText(/^thought$/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Searching")).toBeInTheDocument();
+  });
+
+  it("auto-expands only the last reasoning block while streaming", () => {
+    const r1: UIMessage = { id: "r1", role: "assistant", content: "", reasoning: "past", createdAt: 1 };
+    const t1: UIMessage = { id: "t1", role: "tool", kind: "trace", content: "search()", traces: ["search()"], createdAt: 2 };
+    const r2: UIMessage = { id: "r2", role: "assistant", content: "", reasoning: "live", reasoningStreaming: true, isStreaming: true, createdAt: 3 };
+    render(
+      <AgentActivityCluster
+        messages={[r1, t1, r2]}
+        isTurnStreaming
+        hasBodyBelow
+      />,
+    );
+    expect(screen.getByText("live")).toBeInTheDocument();
+    expect(screen.queryByText("past")).not.toBeInTheDocument();
+  });
+
+  it("renders trailing FileEditGroup after trace cards in a mixed turn", () => {
+    render(
+      <AgentActivityCluster
+        messages={[
+          { id: "r1", role: "assistant", content: "", reasoning: "thinking", createdAt: 1 },
+          {
+            id: "t1", role: "tool", kind: "trace",
             content: "edit_file()",
             traces: ["edit_file()"],
             fileEdits: [{
               call_id: "call-edit",
               tool: "edit_file",
               path: "src/app.tsx",
-              absolute_path: "/Users/renxubin/project/src/app.tsx",
+              absolute_path: "/Users/x/project/src/app.tsx",
               phase: "end",
-              added: 12,
-              deleted: 3,
-              approximate: false,
-              status: "done",
+              added: 5, deleted: 1, approximate: false, status: "done",
             }],
-            createdAt: 3,
-          })}
-          isTurnStreaming={false}
-          hasBodyBelow={false}
-        />,
-      );
-
-      expect(screen.getByRole("button", { name: /edited app\.tsx/i })).toBeInTheDocument();
-      expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
-      expect(screen.getByTestId("activity-header-file-reference")).toHaveAttribute(
-        "aria-label",
-        "/Users/renxubin/project/src/app.tsx",
-      );
-      fireEvent.click(screen.getByRole("button", { name: /edited app\.tsx/i }));
-
-      expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
-      const fileRef = screen.getByTestId("activity-file-reference");
-      expect(fileRef).toHaveTextContent("src/app.tsx");
-      expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
-      for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
-        expect(diffPair).toHaveClass("items-baseline");
-        expect(diffPair).toHaveClass("leading-[inherit]");
-        expect(diffPair.className).not.toContain("translate-y");
-      }
-      await waitFor(() => {
-        expect(screen.getAllByText("+12").length).toBeGreaterThan(0);
-        expect(screen.getAllByText("-3").length).toBeGreaterThan(0);
-      });
-    } finally {
-      restoreMotion();
-    }
+            createdAt: 2,
+          },
+        ]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    expect(screen.getByText(/app\.tsx/i)).toBeInTheDocument();
+    expect(screen.getByText("+5")).toBeInTheDocument();
   });
 
-  it("labels whole-file deletes as deleted instead of edited", () => {
+  it("renders nothing when given an empty message list", () => {
+    const { container } = render(
+      <AgentActivityCluster messages={[]} isTurnStreaming={false} hasBodyBelow={false} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders trailing file edit details in a mixed turn", () => {
     render(
       <AgentActivityCluster
         messages={activityMessages("", {
-          id: "t-delete",
+          id: "t2",
           role: "tool",
           kind: "trace",
-          content: "apply_patch()",
-          traces: ["apply_patch()"],
+          content: "edit_file()",
+          traces: ["edit_file()"],
           fileEdits: [{
-            call_id: "call-delete",
-            tool: "apply_patch",
-            path: "angry-birds.html",
+            call_id: "call-edit",
+            tool: "edit_file",
+            path: "src/app.tsx",
+            absolute_path: "/Users/x/project/src/app.tsx",
             phase: "end",
-            added: 0,
-            deleted: 590,
-            approximate: false,
-            status: "done",
-            operation: "delete",
+            added: 12, deleted: 3, approximate: false, status: "done",
           }],
           createdAt: 3,
         })}
@@ -473,9 +494,10 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
-
-    expect(screen.getByRole("button", { name: /deleted angry-birds\.html/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /edited angry-birds\.html/i })).not.toBeInTheDocument();
+    const fileRef = screen.getByTestId("activity-file-reference");
+    expect(fileRef).toHaveTextContent("src/app.tsx");
+    expect(screen.getAllByText("+12").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("-3").length).toBeGreaterThan(0);
   });
 
   it("renders file-only edits without a redundant disclosure", () => {
@@ -506,11 +528,39 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("-3")).toBeInTheDocument();
+  });
+
+  it("shows 'Preparing edit…' for a pending file edit with no resolved path", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-pending",
+          role: "tool",
+          kind: "trace",
+          content: "apply_patch()",
+          traces: ["apply_patch()"],
+          fileEdits: [{
+            call_id: "call-pending",
+            tool: "apply_patch",
+            path: "",
+            absolute_path: "",
+            phase: "start",
+            added: 0,
+            deleted: 0,
+            approximate: false,
+            status: "editing",
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+    expect(screen.getByText("Preparing edit…")).toBeInTheDocument();
   });
 
   it("renders CLI app runs as dedicated activity rows", () => {
@@ -583,7 +633,7 @@ describe("AgentActivityCluster", () => {
     );
 
     const searchRow = screen.getByText("Searching").closest("li");
-    const cliRow = screen.getByText("@blender").closest("li");
+    const cliRow = screen.getByText(/@blender/).closest("li");
     const fetchRow = screen.getByText("Reading").closest("li");
 
     expect(searchRow).not.toBeNull();
@@ -617,8 +667,6 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
-
-    fireEvent.click(screen.getByRole("button", { name: /failed @github/i }));
 
     expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("Failed");
     expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("@github");
@@ -748,8 +796,6 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /1 tool calls/i }));
-
     expect(screen.getByText("Command")).toBeInTheDocument();
     expect(screen.getByText(/cat << 'EOF' \| bash · script, 6 lines/)).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();
@@ -783,7 +829,6 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /edited app\.tsx/i })).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
     expect(screen.queryByText("-0")).not.toBeInTheDocument();
   });
@@ -847,7 +892,6 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /preparing edit/i })).toBeInTheDocument();
     expect(screen.getByText("Preparing file edit…")).toBeInTheDocument();
   });
 
@@ -877,8 +921,6 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
-
-    fireEvent.click(screen.getByRole("button", { name: /failed angry-birds\.html/i }));
 
     expect(screen.getByText("Target text was not found in angry-birds.html.")).toBeInTheDocument();
   });
@@ -910,78 +952,65 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /failed composition\.html/i }));
-
     expect(screen.getByText("No permission to change this location.")).toBeInTheDocument();
     expect(screen.queryByText(/\[Errno 13\]/)).not.toBeInTheDocument();
   });
 
-  it("merges repeated edits for the same path and lets successful edits win over failures", async () => {
-    const restoreMotion = installReducedMotion();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages("", {
-            id: "t2",
-            role: "tool",
-            kind: "trace",
-            content: "edit_file()",
-            traces: ["edit_file()"],
-            fileEdits: [
-              {
-                call_id: "call-edit-1",
-                tool: "edit_file",
-                path: "minecraft-fps/index.html",
-                phase: "end",
-                added: 2,
-                deleted: 1,
-                approximate: false,
-                status: "done",
-              },
-              {
-                call_id: "call-edit-2",
-                tool: "edit_file",
-                path: "minecraft-fps/index.html",
-                phase: "error",
-                added: 0,
-                deleted: 0,
-                approximate: false,
-                status: "error",
-                error: "patch failed",
-              },
-              {
-                call_id: "call-edit-3",
-                tool: "edit_file",
-                path: "minecraft-fps/index.html",
-                phase: "end",
-                added: 6,
-                deleted: 6,
-                approximate: false,
-                status: "done",
-              },
-            ],
-            createdAt: 3,
-          })}
-          isTurnStreaming={false}
-          hasBodyBelow={false}
-        />,
-      );
+  it("merges repeated edits for the same path and lets successful edits win over failures", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "edit_file()",
+          traces: ["edit_file()"],
+          fileEdits: [
+            {
+              call_id: "call-edit-1",
+              tool: "edit_file",
+              path: "minecraft-fps/index.html",
+              phase: "end",
+              added: 2,
+              deleted: 1,
+              approximate: false,
+              status: "done",
+            },
+            {
+              call_id: "call-edit-2",
+              tool: "edit_file",
+              path: "minecraft-fps/index.html",
+              phase: "error",
+              added: 0,
+              deleted: 0,
+              approximate: false,
+              status: "error",
+              error: "patch failed",
+            },
+            {
+              call_id: "call-edit-3",
+              tool: "edit_file",
+              path: "minecraft-fps/index.html",
+              phase: "end",
+              added: 6,
+              deleted: 6,
+              approximate: false,
+              status: "done",
+            },
+          ],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
 
-      expect(screen.getByRole("button", { name: /edited index\.html/i })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /failed index\.html/i })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: /edited index\.html/i }));
-
-      const fileRefs = screen.getAllByTestId("activity-file-reference");
-      expect(fileRefs).toHaveLength(1);
-      expect(fileRefs[0]).toHaveTextContent("minecraft-fps/index.html");
-      expect(screen.queryByText("Failed")).not.toBeInTheDocument();
-      await waitFor(() => {
-        expect(screen.getAllByText("+8").length).toBeGreaterThan(0);
-        expect(screen.getAllByText("-7").length).toBeGreaterThan(0);
-      });
-    } finally {
-      restoreMotion();
-    }
+    const fileRefs = screen.getAllByTestId("activity-file-reference");
+    expect(fileRefs).toHaveLength(1);
+    expect(fileRefs[0]).toHaveTextContent("minecraft-fps/index.html");
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.getAllByText("+8").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("-7").length).toBeGreaterThan(0);
   });
 
   it("renders tool event embeds as inline activity evidence", () => {
@@ -1011,7 +1040,6 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Web")).toBeInTheDocument();
     expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Homepage screenshot" })).toHaveAttribute(
       "src",
@@ -1042,7 +1070,6 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Vision")).toBeInTheDocument();
     expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
     expect(screen.getByText("missing.png")).toBeInTheDocument();
   });

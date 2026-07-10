@@ -90,6 +90,16 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelin
 - When adding new translation keys, only modify `en/common.json` and `zh-CN/common.json`.
 - Other locale files are maintained separately.
 
+## Feature-to-Code Map
+
+When users mention a feature by name (English or Chinese), use this table to locate the relevant source files directly. Keep this table updated when adding or renaming features.
+
+| Feature (EN) | Feature (ZH) | Primary source files |
+|---|---|---|
+| Agent Activity Cluster / Activity Timeline | 活动追踪 | `docs/tech/agent-activity-cluster.md`, `webui/src/components/thread/AgentActivityCluster.tsx`, `webui/src/components/thread/activity/ActivityStep.tsx` |
+| Message bubble / chat thread | 消息气泡 / 聊天线程 | `webui/src/components/thread/ThreadMessages.tsx`, `webui/src/components/thread/MessageBubble.tsx` |
+| Reasoning block | 思考块 | `webui/src/components/thread/AgentActivityCluster.tsx` (`ReasoningBlock`) |
+
 ## Plan Mode
 
 - Write plan files to `docs/plan/` with meaningful filenames (e.g. `docs/plan/webui-skills-file-tree.md`).

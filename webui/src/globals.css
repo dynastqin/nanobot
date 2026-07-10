@@ -499,6 +499,37 @@
     }
   }
 
+  @keyframes activity-detail-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .activity-detail-row:hover .activity-detail-text {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--foreground) / 0.82) 0%,
+      hsl(var(--foreground) / 0.82) 40%,
+      hsl(var(--foreground) / 0.28) 50%,
+      hsl(var(--foreground) / 0.82) 60%,
+      hsl(var(--foreground) / 0.82) 100%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: activity-detail-shimmer 2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .activity-detail-row:hover .activity-detail-text {
+      animation: none;
+      background: unset;
+      background-clip: unset;
+      -webkit-background-clip: unset;
+      color: hsl(var(--foreground) / 0.82);
+    }
+  }
+
   /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;

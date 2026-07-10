@@ -997,7 +997,7 @@ def _format_tool_call_trace(call: Any) -> str | None:
     if isinstance(args, str) and args.strip():
         return f"{name}({args})"
     if args and isinstance(args, dict):
-        return f"{name}({json.dumps(args, ensure_ascii=False)})"
+        return f"{name}({json.dumps(args, ensure_ascii=False, separators=(',', ':'))})"
     return f"{name}()"
 
 

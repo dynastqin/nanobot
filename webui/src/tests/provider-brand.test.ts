@@ -11,21 +11,12 @@ describe("provider brand logos", () => {
     ]);
   });
 
-  it("keeps explicit Google favicon URLs first before trying fallbacks", () => {
-    expect(logoFallbackUrls("https://www.google.com/s2/favicons?domain=browserbase.com&sz=64")).toEqual([
-      "https://www.google.com/s2/favicons?domain=browserbase.com&sz=64",
-      "https://browserbase.com/favicon.ico",
-      "https://icons.duckduckgo.com/ip3/browserbase.com.ico",
-    ]);
+  it("skips Google favicon proxy URLs to avoid network failures", () => {
+    expect(logoFallbackUrls("https://www.google.com/s2/favicons?domain=browserbase.com&sz=64")).toEqual([]);
   });
 
-  it("normalizes path-like favicon domains for secondary fallbacks", () => {
-    expect(logoFallbackUrls("https://www.google.com/s2/favicons?domain=github.com/HKUDS/CLI-Anything&sz=64")).toEqual([
-      "https://www.google.com/s2/favicons?domain=github.com/HKUDS/CLI-Anything&sz=64",
-      "https://github.com/favicon.ico",
-      "https://icons.duckduckgo.com/ip3/github.com.ico",
-      "https://www.google.com/s2/favicons?domain=github.com%2FHKUDS%2FCLI-Anything&sz=64",
-    ]);
+  it("skips Google favicon proxy with path-like domains", () => {
+    expect(logoFallbackUrls("https://www.google.com/s2/favicons?domain=github.com/HKUDS/CLI-Anything&sz=64")).toEqual([]);
   });
 
   it("keeps Zhipu on the current Z.ai brand domain", () => {

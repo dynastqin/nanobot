@@ -47,25 +47,6 @@ function addUniqueLogoUrl(urls: string[], url: string | null | undefined): void 
   if (value && !urls.includes(value)) urls.push(value);
 }
 
-function domainFromLogoUrl(url: string): string | null {
-  if (url.startsWith("/")) return null;
-  try {
-    const parsed = new URL(url);
-    if (!/^https?:$/.test(parsed.protocol)) return null;
-    const host = parsed.hostname.toLowerCase();
-    if (host === "www.google.com" || host === "google.com") {
-      return parsed.searchParams.get("domain");
-    }
-    if (host === "icons.duckduckgo.com") {
-      const match = parsed.pathname.match(/^\/ip3\/(.+)\.ico$/);
-      return match ? decodeURIComponent(match[1]) : null;
-    }
-    return host.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
-
 function faviconDomainFromValue(value: string): string {
   const host = value.split("/")[0]?.trim();
   return host || value;
@@ -75,18 +56,12 @@ export function logoFallbackUrls(logoUrl: string | null | undefined): string[] {
   const value = logoUrl?.trim();
   if (!value) return [];
   if (value.startsWith("/")) return [value];
-
-  const urls: string[] = [];
-  const domain = domainFromLogoUrl(value);
-  const isFaviconProxy = /^(https?:\/\/)?(www\.google\.com|google\.com|icons\.duckduckgo\.com)\//i.test(value);
-  if (domain && isFaviconProxy) {
-    addUniqueLogoUrl(urls, value);
-    faviconUrls(domain).forEach((url) => addUniqueLogoUrl(urls, url));
-    return urls;
+  // Skip favicon proxy URLs — they often fail due to network issues.
+  // Fall through to local initials / lucide icons instead.
+  if (/^(https?:\/\/)?(www\.google\.com|google\.com|icons\.duckduckgo\.com)\//i.test(value)) {
+    return [];
   }
-  addUniqueLogoUrl(urls, value);
-  if (domain) faviconUrls(domain).forEach((url) => addUniqueLogoUrl(urls, url));
-  return urls;
+  return [value];
 }
 
 export const PROVIDER_BRAND_ALIASES: Record<string, string> = {

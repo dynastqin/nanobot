@@ -345,7 +345,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Worked for 9s")).toBeInTheDocument();
+    expect(screen.getByText("Searching")).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
   });
 
@@ -382,8 +382,7 @@ describe("ThreadMessages", () => {
     expect(units[0].type === "activity" ? units[0].turnLatencyMs : undefined).toBe(20_000);
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("Worked for 20s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
+    expect(screen.getByText("Command")).toBeInTheDocument();
   });
 
   it("keeps late activity after the live assistant answer while streaming", () => {
@@ -431,7 +430,7 @@ describe("ThreadMessages", () => {
     render(<ThreadMessages messages={messages} isStreaming />);
 
     const answer = screen.getByText("partial answer");
-    const liveActivity = screen.getByRole("button", { name: /working/i });
+    const liveActivity = screen.getByText(/api\.github\.com/i);
     expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -700,7 +699,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getByText("Worked for 15s")).toBeInTheDocument();
+    expect(screen.getByText("Searching")).toBeInTheDocument();
     expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 

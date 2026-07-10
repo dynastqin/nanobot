@@ -1,27 +1,26 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertCircle,
+  Brain,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   FileImage,
   Layers,
   Search,
   Server,
-  Terminal,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { cliAppInitials, mcpPresetInitials } from "@/components/CliAppMentionText";
 import { FileReferenceChip } from "@/components/FileReferenceChip";
+import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { StreamingLabelSheen } from "@/components/MessageBubble";
 import { ActivityEvidencePreview } from "@/components/thread/activity/ActivityEvidencePreview";
-import { ActivityGroup } from "@/components/thread/activity/ActivityGroup";
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { DiffPair } from "@/components/thread/activity/DiffPair";
 import { FileEditGroup, hasVisibleDiffStats, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
-import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import {
   activityEvidenceFromMessageMedia,
   activityEvidenceFromToolEvent,
@@ -32,14 +31,338 @@ import {
 import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
 import { formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import { ToolCallDetail } from "@/components/thread/activity/ToolCallDetail";
+import { hasToolCallDetails, ToolCallDetailContent } from "@/components/thread/activity/ToolCallDetail";
 import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
-/** Scrollport height for the Cursor-style “live trace” strip (tailwind spacing). */
-const CLUSTER_SCROLL_MAX_CLASS = "max-h-52";
-const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
-
 export { isAgentActivityMember, isReasoningOnlyAssistant };
+
+export type ReasoningGroup = { kind: "reasoning"; messages: UIMessage[] };
+export type TraceGroup = { kind: "trace"; message: UIMessage };
+export type ActivityGroup = ReasoningGroup | TraceGroup;
+
+export type ActivityRound = {
+  reasoning?: ReasoningGroup;
+  traces: TraceGroup[];
+};
+
+/**
+ * Walk a flat list of activity messages and produce alternating reasoning/trace groups.
+ * Consecutive reasoning-only messages merge into one group; every trace message is its own group.
+ * Non-activity messages are dropped (caller filters them out upstream).
+ */
+export function groupActivityMessages(messages: UIMessage[]): ActivityGroup[] {
+  const groups: ActivityGroup[] = [];
+  let reasoningBuffer: UIMessage[] = [];
+
+  const flushReasoning = () => {
+    if (reasoningBuffer.length === 0) return;
+    groups.push({ kind: "reasoning", messages: reasoningBuffer });
+    reasoningBuffer = [];
+  };
+
+  for (const message of messages) {
+    if (isReasoningOnlyAssistant(message)) {
+      reasoningBuffer.push(message);
+      continue;
+    }
+    if (message.kind === "trace") {
+      flushReasoning();
+      groups.push({ kind: "trace", message });
+      continue;
+    }
+    // Non-activity messages are ignored.
+  }
+  flushReasoning();
+  return groups;
+}
+
+export function groupActivityRounds(groups: ActivityGroup[]): ActivityRound[] {
+  const rounds: ActivityRound[] = [];
+  let current: ActivityRound | null = null;
+
+  for (const group of groups) {
+    if (group.kind === "reasoning") {
+      if (current) rounds.push(current);
+      current = { reasoning: group, traces: [] };
+    } else {
+      if (!current) current = { traces: [] };
+      current.traces.push(group);
+    }
+  }
+  if (current) rounds.push(current);
+  return rounds;
+}
+
+export interface ReasoningBlockProps {
+  messages: UIMessage[];
+  streaming: boolean;
+  isLast: boolean;
+  hasBodyBelow: boolean;
+  onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
+}
+
+export function ReasoningBlock({
+  messages,
+  streaming,
+  isLast,
+  hasBodyBelow,
+  onOpenFilePreview,
+  onOpenLink,
+}: ReasoningBlockProps) {
+  const { t } = useTranslation();
+  const [userToggled, setUserToggled] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const prevStreamingRef = useRef(streaming);
+
+  // Live "now" tick while streaming (for the duration label)
+  useEffect(() => {
+    if (!streaming) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(interval);
+  }, [streaming]);
+
+  // Hold-open for 900ms when streaming flips to false
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = streaming;
+    if (wasStreaming && !streaming) {
+      setHoldOpen(true);
+      const timeout = window.setTimeout(() => setHoldOpen(false), 900);
+      return () => window.clearTimeout(timeout);
+    }
+    return undefined;
+  }, [streaming]);
+
+  const autoOpen = (streaming || holdOpen) && isLast;
+  const open = userToggled ? localOpen : autoOpen;
+
+  // Duration from the group's own messages
+  const timestamps = messages
+    .map((m) => m.createdAt)
+    .filter((value) => Number.isFinite(value));
+  const hasTimestamps = timestamps.length > 0;
+  const first = hasTimestamps ? Math.min(...timestamps) : 0;
+  const last = streaming && first > 1_000_000_000_000
+    ? now
+    : hasTimestamps ? Math.max(...timestamps) : 0;
+  const durationMs = hasTimestamps ? Math.max(0, last - first) : 0;
+  const duration = formatActivityDuration(durationMs);
+  const reasoningTotalLen = messages.reduce((n, m) => n + (m.reasoning ?? "").length, 0);
+
+  const label = streaming
+    ? durationMs <= 0
+      ? t("message.activityThinking", { defaultValue: "Thinking…" })
+      : t("message.activityThinkingFor", { duration, defaultValue: "Thinking for {{duration}}" })
+    : durationMs <= 0
+      ? t("message.activityThought", { defaultValue: "Thought" })
+      : t("message.activityThoughtFor", { duration, defaultValue: "Thought for {{duration}}" });
+
+  const handleClick = () => {
+    setUserToggled(true);
+    setLocalOpen(!open);
+  };
+
+  useEffect(() => {
+    if (reasoningTotalLen > 0) preloadMarkdownText();
+  }, [reasoningTotalLen]);
+
+  return (
+    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+      <button
+        type="button"
+        onClick={handleClick}
+        className={cn(
+          "group flex max-w-full items-center gap-1.5 rounded-md px-1 py-1",
+          "text-[12.5px] text-muted-foreground/72 transition-colors hover:text-muted-foreground",
+        )}
+        aria-expanded={open}
+        aria-label={label}
+      >
+        <Brain className="h-3.5 w-3.5 shrink-0 text-muted-foreground/45" />
+        <StreamingLabelSheen active={streaming} className="min-w-0">
+          {label}
+        </StreamingLabelSheen>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-transform duration-200",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="ml-1 mt-1 space-y-1 border-l-2 border-muted-foreground/15 pl-3">
+          {messages.map((m) => {
+            const text = m.reasoning ?? "";
+            if (!text.trim()) return null;
+            return (
+              <MarkdownText
+                key={m.id}
+                streaming={streaming && !!m.reasoningStreaming}
+                onOpenFilePreview={onOpenFilePreview}
+                onOpenLink={onOpenLink}
+                className={cn(
+                  "min-w-0 text-[12.5px] italic text-muted-foreground/78",
+                  "prose-p:my-1 prose-li:my-0.5",
+                  "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
+                  "prose-headings:text-muted-foreground/88 prose-strong:text-muted-foreground",
+                  "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
+                  "prose-a:text-blue-500 prose-a:underline hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
+                  "prose-code:text-[0.92em]",
+                )}
+              >
+                {text}
+              </MarkdownText>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export interface TraceActivityCardProps {
+  message: UIMessage;
+  active: boolean;
+  cliAppsByName: Map<string, CliAppInfo>;
+  mcpPresetsByName: Map<string, McpPresetInfo>;
+}
+
+export function TraceActivityCard({
+  message,
+  active,
+  cliAppsByName,
+  mcpPresetsByName,
+}: TraceActivityCardProps) {
+  const lines = traceLines(message);
+  const cliRunsByLine = cliRunMapByTraceLine(message);
+  const mcpRunsByLine = mcpRunMapByTraceLine(message);
+  const evidenceByLine = toolEvidenceByTraceLine(message);
+  const trailingEvidence = activityEvidenceFromMessageMedia(message);
+  const renderedRunKeys = new Set<string>();
+  const items: ReactNode[] = [];
+  let normalLines: string[] = [];
+
+  const eventByLine = useMemo(() => {
+    const map = new Map<string, ToolProgressEvent>();
+    for (const event of message.toolEvents ?? []) {
+      const traceLine = formatToolCallTrace(event);
+      if (traceLine) map.set(traceLine, event);
+    }
+    return map;
+  }, [message.toolEvents]);
+
+  const flushNormalLines = (suffix: string) => {
+    if (!normalLines.length) return;
+    items.push(
+      <ul key={`${message.id}:trace:${suffix}`} className="space-y-1">
+        {normalLines.map((line, index) => (
+          <ActivityTraceRow
+            key={`${line}-${suffix}-${index}`}
+            line={line}
+            active={active && index === normalLines.length - 1}
+            evidence={evidenceByLine?.get(line) ?? []}
+            toolEvent={eventByLine.get(line)}
+          />
+        ))}
+      </ul>,
+    );
+    normalLines = [];
+  };
+
+  lines.forEach((line, index) => {
+    const cliRun = cliRunsByLine.get(line) ?? parseCliRunTrace(line);
+    if (cliRun) {
+      flushNormalLines(String(index));
+      renderedRunKeys.add(cliRun.key);
+      items.push(
+        <CliRunGroup
+          key={`${message.id}:cli:${cliRun.key}:${index}`}
+          runs={[cliRun]}
+          active={active}
+          cliAppsByName={cliAppsByName}
+        />,
+      );
+      const evidence = evidenceByLine.get(line) ?? [];
+      if (evidence.length) {
+        items.push(
+          <ActivityEvidenceList
+            key={`${message.id}:cli-evidence:${cliRun.key}:${index}`}
+            evidence={evidence}
+          />,
+        );
+      }
+      return;
+    }
+
+    const mcpRun = mcpRunsByLine.get(line) ?? parseMcpRunTrace(line);
+    if (mcpRun) {
+      flushNormalLines(String(index));
+      renderedRunKeys.add(mcpRun.key);
+      items.push(
+        <McpRunGroup
+          key={`${message.id}:mcp:${mcpRun.key}:${index}`}
+          runs={[mcpRun]}
+          active={active}
+          mcpPresetsByName={mcpPresetsByName}
+          toolEvent={eventByLine.get(line)}
+        />,
+      );
+      const evidence = evidenceByLine.get(line) ?? [];
+      if (evidence.length) {
+        items.push(
+          <ActivityEvidenceList
+            key={`${message.id}:mcp-evidence:${mcpRun.key}:${index}`}
+            evidence={evidence}
+          />,
+        );
+      }
+      return;
+    }
+
+    normalLines.push(line);
+  });
+
+  flushNormalLines("tail");
+
+  for (const run of cliRunsByLine.values()) {
+    if (renderedRunKeys.has(run.key)) continue;
+    items.push(
+      <CliRunGroup
+        key={`${message.id}:cli:${run.key}:event`}
+        runs={[run]}
+        active={active}
+        cliAppsByName={cliAppsByName}
+      />,
+    );
+  }
+  for (const run of mcpRunsByLine.values()) {
+    if (renderedRunKeys.has(run.key)) continue;
+    items.push(
+      <McpRunGroup
+        key={`${message.id}:mcp:${run.key}:event`}
+        runs={[run]}
+        active={active}
+        mcpPresetsByName={mcpPresetsByName}
+      />,
+    );
+  }
+
+  if (trailingEvidence.length) {
+    items.push(
+      <ActivityEvidenceList
+        key={`${message.id}:media-evidence`}
+        evidence={trailingEvidence}
+      />,
+    );
+  }
+
+  if (!items.length) return null;
+  return <div className="w-full">{items}</div>;
+}
 
 interface ActivityCounts {
   reasoningSteps: number;
@@ -53,6 +376,7 @@ interface ActivityCounts {
   hasEditingFiles: boolean;
   hasFailedFiles: boolean;
   hasDeletedFiles: boolean;
+  hasPendingFileEdit: boolean;
   primaryFilePath?: string;
   primaryFileTooltipPath?: string;
   primaryCliName?: string;
@@ -117,6 +441,7 @@ function countActivity(
   let deleted = 0;
   let hasDiffStats = false;
   let hasEditingFiles = false;
+  let hasPendingFileEdit = false;
   let failedFileCount = 0;
   let deletedFileCount = 0;
   let primaryFilePath: string | undefined;
@@ -124,6 +449,9 @@ function countActivity(
   for (const edit of fileEdits) {
     primaryFilePath = edit.path;
     primaryFileTooltipPath = edit.absolute_path || edit.path;
+    if (edit.pending) {
+      hasPendingFileEdit = true;
+    }
     if (edit.status === "editing") {
       hasEditingFiles = true;
     }
@@ -155,6 +483,7 @@ function countActivity(
     hasEditingFiles,
     hasFailedFiles: fileEdits.length > 0 && failedFileCount === fileEdits.length,
     hasDeletedFiles: fileEdits.length > 0 && deletedFileCount === fileEdits.length,
+    hasPendingFileEdit,
     primaryFilePath,
     primaryFileTooltipPath,
     primaryCliName,
@@ -192,13 +521,10 @@ export function AgentActivityCluster({
   onOpenFilePreview,
   onOpenLink,
 }: AgentActivityClusterProps) {
-  const { t } = useTranslation();
   const fileEdits = useMemo(
     () => summarizeFileEdits(collectFileEdits(messages), isTurnStreaming),
     [messages, isTurnStreaming],
   );
-  const cliRuns = useMemo(() => collectCliRuns(messages), [messages]);
-  const mcpRuns = useMemo(() => collectMcpRuns(messages), [messages]);
   const cliAppsByName = useMemo(
     () => new Map(cliApps.map((app) => [app.name.toLowerCase(), app])),
     [cliApps],
@@ -207,344 +533,162 @@ export function AgentActivityCluster({
     () => new Map(mcpPresets.map((preset) => [preset.name.toLowerCase(), preset])),
     [mcpPresets],
   );
-  const {
-    reasoningSteps,
-    toolCalls,
-    cliCount,
-    mcpCount,
-    fileCount,
-    added,
-    deleted,
-    hasDiffStats,
-    hasEditingFiles,
-    hasFailedFiles,
-    hasDeletedFiles,
-    primaryFilePath,
-    primaryFileTooltipPath,
-    primaryCliName,
-    primaryCliStatus,
-    primaryMcpDisplayName,
-    primaryMcpStatus,
-  } = countActivity(messages, fileEdits, cliRuns, mcpRuns);
-  const hasPendingFileEdit = fileEdits.some((edit) => edit.pending);
 
-  const [userToggledOuter, setUserToggledOuter] = useState(false);
-  const [outerOpenLocal, setOuterOpenLocal] = useState(false);
-  const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
+  const counts = countActivity(messages, fileEdits, collectCliRuns(messages), collectMcpRuns(messages));
+  const hasVisibleActivity =
+    counts.reasoningSteps > 0
+    || counts.toolCalls > 0
+    || counts.cliCount > 0
+    || counts.mcpCount > 0
+    || counts.fileCount > 0;
+  const hasOnlyFileActivity = fileEdits.length > 0 && messages.every(messageHasOnlyFileActivity);
+
+  const groups = useMemo(() => groupActivityMessages(messages), [messages]);
+  const rounds = useMemo(() => groupActivityRounds(groups), [groups]);
+
   const [now, setNow] = useState(() => Date.now());
-  const activityScrollRef = useRef<HTMLDivElement>(null);
-  const activityContentRef = useRef<HTMLDivElement>(null);
-  const autoFollowActivityRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
-  const wasTurnStreamingRef = useRef(isTurnStreaming);
-  const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
-  const outerExpanded = userToggledOuter
-    ? outerOpenLocal
-    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
-
-  const hasLiveEditingFiles = isTurnStreaming && hasEditingFiles;
-  const singleFilePath = fileCount === 1 ? primaryFilePath : undefined;
-  const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
-  const hasOnlyFileActivity = fileCount > 0 && messages.every(messageHasOnlyFileActivity);
-  const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
-  const durationMs = activityDurationMs(messages, isTurnStreaming, now, turnLatencyMs);
-  const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = hasNonReasoningActivity
-    ? isTurnStreaming
-      ? t("message.activityWorkingFor", {
-          duration: activityDuration,
-          defaultValue: "Working for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityWorked", { defaultValue: "Worked" })
-      : t("message.activityWorkedFor", {
-          duration: activityDuration,
-          defaultValue: "Worked for {{duration}}",
-        })
-    : isTurnStreaming
-      ? t("message.activityThinkingFor", {
-          duration: activityDuration,
-          defaultValue: "Thinking for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityThought", { defaultValue: "Thought" })
-      : t("message.activityThoughtFor", {
-          duration: activityDuration,
-          defaultValue: "Thought for {{duration}}",
-        });
-
-  const fileActivitySummary = fileCount > 0
-    ? hasPendingFileEdit && !singleFilePath
-      ? t("message.fileActivityPreparing", { defaultValue: "Preparing edit…" })
-      : singleFilePath
-      ? t(fileActivitySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
-          file: shortFileName(singleFilePath),
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{file}}`,
-        })
-      : t(fileActivityManySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
-          count: fileCount,
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{count}} files`,
-        })
-    : "";
-
-  const cliActivitySummary = cliCount > 0
-    ? cliCount === 1 && primaryCliName
-      ? t(cliActivitySummaryKey(primaryCliStatus, isTurnStreaming), {
-          name: primaryCliName,
-          defaultValue: cliActivitySummaryDefault(primaryCliStatus, isTurnStreaming),
-        })
-      : t(cliActivityManySummaryKey(cliRuns, isTurnStreaming), {
-          count: cliCount,
-          defaultValue: cliActivityManySummaryDefault(cliRuns, isTurnStreaming),
-        })
-    : "";
-
-  const mcpActivitySummary = mcpCount > 0
-    ? mcpCount === 1 && primaryMcpDisplayName
-      ? t(mcpActivitySummaryKey(primaryMcpStatus, isTurnStreaming), {
-          name: primaryMcpDisplayName,
-          defaultValue: mcpActivitySummaryDefault(primaryMcpStatus, isTurnStreaming),
-        })
-      : t(mcpActivityManySummaryKey(mcpRuns, isTurnStreaming), {
-          count: mcpCount,
-          defaultValue: mcpActivityManySummaryDefault(mcpRuns, isTurnStreaming),
-        })
-    : "";
-
-  const summary = fileCount > 0
-    ? fileActivitySummary
-    : cliCount > 0
-      ? cliActivitySummary
-    : mcpCount > 0
-      ? mcpActivitySummary
-    : isTurnStreaming
-      ? reasoningSteps > 0
-        ? t("message.agentActivityLiveSummary", {
-            reasoning: reasoningSteps,
-            tools: toolCalls,
-            defaultValue: "Working… · {{reasoning}} steps · {{tools}} tool calls",
-          })
-        : toolCalls === 0 && fileCount > 0
-          ? t("message.agentActivityLiveFilesOnly", { defaultValue: "Working…" })
-        : t("message.agentActivityLiveToolsOnly", {
-            tools: toolCalls,
-            defaultValue: "Working… · {{tools}} tool calls",
-          })
-      : reasoningSteps > 0
-        ? t("message.agentActivitySummary", {
-            reasoning: reasoningSteps,
-            tools: toolCalls,
-            defaultValue: "{{reasoning}} steps · {{tools}} tool calls",
-          })
-        : toolCalls === 0 && fileCount > 0
-          ? t("message.agentActivityFilesOnly", { defaultValue: "File changes" })
-        : t("message.agentActivityToolsOnly", {
-            tools: toolCalls,
-            defaultValue: "{{tools}} tool calls",
-          });
-
-  const cancelActivityScrollFrame = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  }, []);
-
-  const scrollActivityToBottom = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-  }, []);
-
-  const scheduleActivityScrollToBottom = useCallback(() => {
-    cancelActivityScrollFrame();
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      scrollActivityToBottom();
-    });
-  }, [cancelActivityScrollFrame, scrollActivityToBottom]);
-
-  const toggleOuter = () => {
-    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
-    if (nextOpen) {
-      autoFollowActivityRef.current = true;
-    }
-    setUserToggledOuter(true);
-    setOuterOpenLocal(nextOpen);
-  };
-
-  useLayoutEffect(() => {
-    if (!outerExpanded || !autoFollowActivityRef.current) return;
-    scheduleActivityScrollToBottom();
-  }, [outerExpanded, messages, isTurnStreaming, scheduleActivityScrollToBottom]);
-
   useEffect(() => {
-    if (!outerExpanded) {
-      autoFollowActivityRef.current = true;
-      return;
-    }
-    const target = activityContentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (autoFollowActivityRef.current) {
-        scheduleActivityScrollToBottom();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom]);
-
-  useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
-
-  useEffect(() => {
-    if (!isTurnStreaming) return undefined;
+    if (!isTurnStreaming) return;
     const interval = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(interval);
   }, [isTurnStreaming]);
 
-  useEffect(() => {
-    const wasStreaming = wasTurnStreamingRef.current;
-    wasTurnStreamingRef.current = isTurnStreaming;
-    if (isTurnStreaming) {
-      setCompletionHoldOpen(false);
-      return undefined;
-    }
-    if (!wasStreaming || userToggledOuter) return undefined;
-    setCompletionHoldOpen(true);
-    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 900);
-    return () => window.clearTimeout(timeout);
-  }, [isTurnStreaming, userToggledOuter]);
-
-  const onActivityScroll = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-  }, []);
+  const totalDuration = useMemo(() => {
+    if (turnLatencyMs != null) return formatActivityDuration(turnLatencyMs);
+    const timestamps = messages
+      .map((m) => m.createdAt)
+      .filter((v) => Number.isFinite(v));
+    if (!timestamps.length) return "";
+    const first = Math.min(...timestamps);
+    const last = isTurnStreaming ? now : Math.max(...timestamps);
+    const ms = Math.max(0, last - first);
+    return ms > 0 ? formatActivityDuration(ms) : "";
+  }, [messages, turnLatencyMs, isTurnStreaming, now]);
 
   if (!hasVisibleActivity) return null;
 
   if (hasOnlyFileActivity) {
+    const singleFilePath = counts.fileCount === 1 ? counts.primaryFilePath : undefined;
+    const singleFileTooltipPath = counts.fileCount === 1 ? counts.primaryFileTooltipPath : undefined;
+    const hasLiveEditingFiles = isTurnStreaming && counts.hasEditingFiles;
     return (
       <FileEditFlatActivity
         edits={fileEdits}
         active={isTurnStreaming}
         hasBodyBelow={hasBodyBelow}
-        summary={summary}
+        summary={fileOnlySummary(counts, isTurnStreaming)}
         singleFilePath={singleFilePath}
         singleFileTooltipPath={singleFileTooltipPath}
         hasLiveEditingFiles={hasLiveEditingFiles}
-        hasFailedFiles={hasFailedFiles}
-        hasDeletedFiles={hasDeletedFiles}
-        added={added}
-        deleted={deleted}
-        hasDiffStats={hasDiffStats}
+        hasFailedFiles={counts.hasFailedFiles}
+        hasDeletedFiles={counts.hasDeletedFiles}
+        added={counts.added}
+        deleted={counts.deleted}
+        hasDiffStats={counts.hasDiffStats}
         onOpenFilePreview={onOpenFilePreview}
       />
     );
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
-      <button
-        type="button"
-        onClick={toggleOuter}
-        className={cn(
-          "group flex max-w-full items-center gap-1.5 rounded-md px-1 py-1",
-          "text-[12.5px] text-muted-foreground/72 transition-colors hover:text-muted-foreground",
-        )}
-        aria-expanded={outerExpanded}
-        aria-label={summary}
-      >
-        <StreamingLabelSheen
-          active={isTurnStreaming}
-          className="min-w-0"
-        >
-          {singleFilePath ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles) : thoughtLabel}
-        </StreamingLabelSheen>
-        {singleFilePath ? (
-          <FileReferenceChip
-            path={singleFilePath}
-            tooltipPath={singleFileTooltipPath}
-            previewPath={singleFileTooltipPath || singleFilePath}
-            onOpen={onOpenFilePreview}
-            active={hasLiveEditingFiles}
-            className="-my-0.5 min-w-0"
-            textClassName="text-xs"
-            testId="activity-header-file-reference"
-          />
-        ) : null}
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left">
-          {fileCount > 0 && hasDiffStats && (
-            <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/85">
-              <DiffPair added={added} deleted={deleted} />
-            </span>
-          )}
-        </span>
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 transition-transform duration-200",
-            outerExpanded && "rotate-90",
-          )}
-        />
-      </button>
+    <div className={cn("flex w-full flex-col gap-2", hasBodyBelow && "mb-2")}>
+      {rounds.map((round, roundIndex) => {
+        const isLastRound = roundIndex === rounds.length - 1;
+        const reasoningIsLast = isLastRound && round.traces.length === 0;
 
-      {outerExpanded && (
-        <div
-          className={cn(
-            "ml-1 mt-1 overflow-hidden pl-1",
-          )}
-        >
-          <div
-            ref={activityScrollRef}
-            data-testid="agent-activity-scroll"
-            onScroll={onActivityScroll}
-            className={cn(
-              CLUSTER_SCROLL_MAX_CLASS,
-              "overflow-y-auto py-1 pr-1 scrollbar-thin scrollbar-track-transparent",
-            )}
-          >
-            <div ref={activityContentRef} className="flex flex-col gap-0.5">
-              {messages.map((m) => {
-                if (isReasoningOnlyAssistant(m)) {
-                  return (
-                    <ReasoningRow
-                      key={m.id}
-                      text={m.reasoning ?? ""}
-                      streaming={isTurnStreaming && !!m.reasoningStreaming}
-                      onOpenFilePreview={onOpenFilePreview}
-                      onOpenLink={onOpenLink}
-                    />
-                  );
-                }
-                if (m.kind === "trace") {
-                  return (
-                    <ActivityTraceTimeline
-                      key={m.id}
-                      message={m}
-                      active={isTurnStreaming}
-                      cliAppsByName={cliAppsByName}
-                      mcpPresetsByName={mcpPresetsByName}
-                    />
-                  );
-                }
-                return null;
-              })}
-              {fileEdits.length ? (
-                <FileEditGroup
-                  edits={fileEdits}
-                  onOpenFilePreview={onOpenFilePreview}
-                />
-              ) : null}
-            </div>
-          </div>
+        return (
+          <ActivityRoundContainer
+            key={`round:${roundIndex}`}
+            round={round}
+            isLastRound={isLastRound}
+            reasoningIsLast={reasoningIsLast}
+            isTurnStreaming={isTurnStreaming}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+            onOpenFilePreview={onOpenFilePreview}
+            onOpenLink={onOpenLink}
+          />
+        );
+      })}
+      {totalDuration && (
+        <div className="flex items-center gap-1.5 px-1">
+          <span className="text-[11px] text-muted-foreground/45">
+            {isTurnStreaming
+              ? `Working for ${totalDuration}`
+              : `Worked for ${totalDuration}`}
+          </span>
         </div>
       )}
+      {fileEdits.length ? (
+        <FileEditGroup edits={fileEdits} onOpenFilePreview={onOpenFilePreview} />
+      ) : null}
     </div>
   );
+}
+
+function ActivityRoundContainer({
+  round,
+  isLastRound,
+  reasoningIsLast,
+  isTurnStreaming,
+  cliAppsByName,
+  mcpPresetsByName,
+  onOpenFilePreview,
+  onOpenLink,
+}: {
+  round: ActivityRound;
+  isLastRound: boolean;
+  reasoningIsLast: boolean;
+  isTurnStreaming: boolean;
+  cliAppsByName: Map<string, CliAppInfo>;
+  mcpPresetsByName: Map<string, McpPresetInfo>;
+  onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-2">
+      {round.reasoning && (
+        <ReasoningBlock
+          messages={round.reasoning.messages}
+          streaming={
+            isTurnStreaming
+            && reasoningIsLast
+            && round.reasoning.messages.some((m) => m.reasoningStreaming || m.isStreaming)
+          }
+          isLast={reasoningIsLast}
+          hasBodyBelow={false}
+          onOpenFilePreview={onOpenFilePreview}
+          onOpenLink={onOpenLink}
+        />
+      )}
+      {round.traces.map((trace, traceIndex) => {
+        const isLastTrace = isLastRound && traceIndex === round.traces.length - 1;
+        return (
+          <TraceActivityCard
+            key={`trace:${trace.message.id}`}
+            message={trace.message}
+            active={isTurnStreaming && isLastTrace}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function fileOnlySummary(counts: ActivityCounts, active: boolean): string {
+  const fileCount = counts.fileCount;
+  const hasLiveEditingFiles = active && counts.hasEditingFiles;
+  const verb = fileActivityVerb(hasLiveEditingFiles, counts.hasFailedFiles, counts.hasDeletedFiles);
+  const singleFilePath = fileCount === 1 ? counts.primaryFilePath : undefined;
+  if (counts.hasPendingFileEdit && !singleFilePath) {
+    return "Preparing edit…";
+  }
+  if (singleFilePath) {
+    return `${verb} ${shortFileName(singleFilePath)}`;
+  }
+  return `${verb} ${fileCount} ${fileCount === 1 ? "file" : "files"}`;
 }
 
 function messageHasOnlyFileActivity(message: UIMessage): boolean {
@@ -626,26 +770,6 @@ function shortFileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-function activityDurationMs(
-  messages: UIMessage[],
-  active: boolean,
-  now: number,
-  completedLatencyMs?: number,
-): number {
-  if (!active && Number.isFinite(completedLatencyMs) && completedLatencyMs! >= 0) {
-    return Math.round(completedLatencyMs!);
-  }
-  const timestamps = messages
-    .map((message) => message.createdAt)
-    .filter((value) => Number.isFinite(value));
-  if (!timestamps.length) return 0;
-  const first = Math.min(...timestamps);
-  const last = active && first > 1_000_000_000_000
-    ? now
-    : Math.max(...timestamps);
-  return Math.max(0, last - first);
-}
-
 function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -659,147 +783,21 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function ActivityTraceTimeline({
-  message,
-  active,
-  cliAppsByName,
-  mcpPresetsByName,
-}: {
-  message: UIMessage;
-  active: boolean;
-  cliAppsByName: Map<string, CliAppInfo>;
-  mcpPresetsByName: Map<string, McpPresetInfo>;
-}) {
-  const lines = traceLines(message);
-  const cliRunsByLine = cliRunMapByTraceLine(message);
-  const mcpRunsByLine = mcpRunMapByTraceLine(message);
-  const evidenceByLine = toolEvidenceByTraceLine(message);
-  const trailingEvidence = activityEvidenceFromMessageMedia(message);
-  const renderedRunKeys = new Set<string>();
-  const items: ReactNode[] = [];
-  let normalLines: string[] = [];
-
-  // Build a lookup: trace line → ToolProgressEvent
-  const eventByLine = useMemo(() => {
-    const map = new Map<string, ToolProgressEvent>();
-    for (const event of message.toolEvents ?? []) {
-      const traceLine = formatToolCallTrace(event);
-      if (traceLine) map.set(traceLine, event);
-    }
-    return map;
-  }, [message.toolEvents]);
-
-  const flushNormalLines = (suffix: string) => {
-    if (!normalLines.length) return;
-    items.push(
-      <ul key={`${message.id}:trace:${suffix}`} className="space-y-1">
-        {normalLines.map((line, index) => (
-          <ActivityTraceRow
-            key={`${line}-${suffix}-${index}`}
-            line={line}
-            active={active && index === normalLines.length - 1}
-            evidence={evidenceByLine?.get(line) ?? []}
-            toolEvent={eventByLine.get(line)}
-          />
-        ))}
-      </ul>,
-    );
-    normalLines = [];
-  };
-
-  lines.forEach((line, index) => {
-    const cliRun = cliRunsByLine.get(line) ?? parseCliRunTrace(line);
-    if (cliRun) {
-      flushNormalLines(String(index));
-      renderedRunKeys.add(cliRun.key);
-      items.push(
-        <CliRunGroup
-          key={`${message.id}:cli:${cliRun.key}:${index}`}
-          runs={[cliRun]}
-          active={active}
-          cliAppsByName={cliAppsByName}
-        />,
-      );
-      const evidence = evidenceByLine.get(line) ?? [];
-      if (evidence.length) {
-        items.push(
-          <ActivityEvidenceList
-            key={`${message.id}:cli-evidence:${cliRun.key}:${index}`}
-            evidence={evidence}
-          />,
-        );
-      }
-      return;
-    }
-
-    const mcpRun = mcpRunsByLine.get(line) ?? parseMcpRunTrace(line);
-    if (mcpRun) {
-      flushNormalLines(String(index));
-      renderedRunKeys.add(mcpRun.key);
-      items.push(
-        <McpRunGroup
-          key={`${message.id}:mcp:${mcpRun.key}:${index}`}
-          runs={[mcpRun]}
-          active={active}
-          mcpPresetsByName={mcpPresetsByName}
-        />,
-      );
-      const evidence = evidenceByLine.get(line) ?? [];
-      if (evidence.length) {
-        items.push(
-          <ActivityEvidenceList
-            key={`${message.id}:mcp-evidence:${mcpRun.key}:${index}`}
-            evidence={evidence}
-          />,
-        );
-      }
-      return;
-    }
-
-    normalLines.push(line);
-  });
-
-  flushNormalLines("tail");
-
-  for (const run of cliRunsByLine.values()) {
-    if (renderedRunKeys.has(run.key)) continue;
-    items.push(
-      <CliRunGroup
-        key={`${message.id}:cli:${run.key}:event`}
-        runs={[run]}
-        active={active}
-        cliAppsByName={cliAppsByName}
-      />,
-    );
+function traceLabelColor(label: string): string {
+  switch (label) {
+    case "Searching":
+      return "text-violet-600 dark:text-violet-400";
+    case "Reading":
+      return "text-emerald-600 dark:text-emerald-400";
+    case "Command":
+      return "text-amber-600 dark:text-amber-400";
+    case "Using":
+      return "text-sky-600 dark:text-sky-400";
+    case "Done":
+      return "text-emerald-500/75";
+    default:
+      return "text-muted-foreground/85";
   }
-  for (const run of mcpRunsByLine.values()) {
-    if (renderedRunKeys.has(run.key)) continue;
-    items.push(
-      <McpRunGroup
-        key={`${message.id}:mcp:${run.key}:event`}
-        runs={[run]}
-        active={active}
-        mcpPresetsByName={mcpPresetsByName}
-      />,
-    );
-  }
-
-  if (trailingEvidence.length) {
-    items.push(
-      <ActivityEvidenceList
-        key={`${message.id}:media-evidence`}
-        evidence={trailingEvidence}
-      />,
-    );
-  }
-
-  if (!items.length) return null;
-  const group = describeActivityGroup(message, evidenceByLine, trailingEvidence);
-  return (
-    <ActivityGroup title={group.title} icon={group.icon}>
-      {items}
-    </ActivityGroup>
-  );
 }
 
 function ActivityTraceRow({
@@ -821,6 +819,9 @@ function ActivityTraceRow({
       : trace.kind === "tool"
         ? Wrench
         : Layers;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const showDetails = toolEvent && hasToolCallDetails(toolEvent);
+
   return (
     <ActivityStep
       as="li"
@@ -829,10 +830,23 @@ function ActivityTraceRow({
       tone={trace.kind === "done" ? "success" : active ? "active" : "neutral"}
       label={trace.label}
       detail={trace.detail}
-      title={`${trace.label}${trace.detail ? ` ${trace.detail}` : ""}`}
+      labelClassName={traceLabelColor(trace.label)}
+      onClick={showDetails ? () => setDetailsOpen(!detailsOpen) : undefined}
+      aside={
+        showDetails ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setDetailsOpen(!detailsOpen); }}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground/55 hover:text-muted-foreground/80 transition-colors shrink-0"
+            aria-label={detailsOpen ? "Hide details" : "Show details"}
+          >
+            {detailsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+        ) : undefined
+      }
     >
       <ActivityEvidencePreview evidence={evidence} />
-      {toolEvent ? <ToolCallDetail event={toolEvent} /> : null}
+      {detailsOpen && toolEvent ? <ToolCallDetailContent event={toolEvent} /> : null}
     </ActivityStep>
   );
 }
@@ -870,41 +884,6 @@ function toolEvidenceByTraceLine(message: UIMessage): Map<string, ActivityEviden
     map.set(line, [...existing, ...evidence]);
   }
   return map;
-}
-
-function allToolEvidence(evidenceByLine: Map<string, ActivityEvidence[]>): ActivityEvidence[] {
-  return [...evidenceByLine.values()].flat();
-}
-
-function describeActivityGroup(
-  message: UIMessage,
-  evidenceByLine: Map<string, ActivityEvidence[]>,
-  mediaEvidence: ActivityEvidence[],
-): { title: string; icon: LucideIcon } {
-  const names = [
-    ...traceLines(message).map((line) => /^([a-zA-Z0-9_.-]+)\(/.exec(line.trim())?.[1] ?? line),
-    ...(message.toolEvents ?? []).map(toolEventDisplayName),
-  ].map((name) => name.toLowerCase());
-  const evidence = [...allToolEvidence(evidenceByLine), ...mediaEvidence];
-  const hasVisualEvidence = evidence.some((item) => item.attachment.kind === "image" || item.attachment.kind === "video");
-  if (hasVisualEvidence && names.some((name) => /browser|screenshot|vision|image|video/.test(name))) {
-    return { title: "Vision", icon: FileImage };
-  }
-  if (names.some((name) => /browser|screenshot/.test(name))) return { title: "Browser", icon: FileImage };
-  if (names.some((name) => /web|search|fetch|read|open/.test(name))) return { title: "Web", icon: Search };
-  if (names.some((name) => /exec|shell|terminal|bash|run_cli_app|cli_anything/.test(name))) return { title: "Shell", icon: Terminal };
-  if (names.some((name) => /^mcp_|mcp/.test(name))) return { title: "MCP", icon: Server };
-  if (message.fileEdits?.length) return { title: "Files", icon: Layers };
-  if (evidence.length) return { title: "Media", icon: FileImage };
-  return { title: "Working", icon: Layers };
-}
-
-function toolEventDisplayName(event: ToolProgressEvent): string {
-  return typeof (event as { function?: { name?: unknown } }).function?.name === "string"
-    ? String((event as { function?: { name?: unknown } }).function?.name)
-    : typeof event.name === "string"
-      ? event.name
-      : "";
 }
 
 interface TraceDescription {
@@ -1447,28 +1426,6 @@ function formatCliArgs(run: CliRunSummary): string {
   return args.join(" ");
 }
 
-function cliActivitySummaryKey(status: CliRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "message.cliActivityFailedOne";
-  return active && status === "running" ? "message.cliActivityRunningOne" : "message.cliActivityRanOne";
-}
-
-function cliActivitySummaryDefault(status: CliRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "Failed @{{name}}";
-  return `${active && status === "running" ? "Using" : "Used"} @{{name}}`;
-}
-
-function cliActivityManySummaryKey(runs: CliRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "message.cliActivityFailedMany";
-  return active && runs.some((run) => run.status === "running")
-    ? "message.cliActivityRunningMany"
-    : "message.cliActivityRanMany";
-}
-
-function cliActivityManySummaryDefault(runs: CliRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "{{count}} CLI apps failed";
-  return `${active && runs.some((run) => run.status === "running") ? "Using" : "Used"} {{count}} CLI apps`;
-}
-
 function cliRunLabelKey(run: CliRunSummary, active: boolean): string {
   if (run.status === "error") return "message.cliRunFailed";
   return active && run.status === "running" ? "message.cliRunRunning" : "message.cliRunRan";
@@ -1477,28 +1434,6 @@ function cliRunLabelKey(run: CliRunSummary, active: boolean): string {
 function cliRunLabelDefault(run: CliRunSummary, active: boolean): string {
   if (run.status === "error") return "Failed";
   return active && run.status === "running" ? "Using" : "Used";
-}
-
-function mcpActivitySummaryKey(status: McpRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "message.mcpActivityFailedOne";
-  return active && status === "running" ? "message.mcpActivityRunningOne" : "message.mcpActivityRanOne";
-}
-
-function mcpActivitySummaryDefault(status: McpRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "Failed {{name}}";
-  return `${active && status === "running" ? "Using" : "Used"} {{name}}`;
-}
-
-function mcpActivityManySummaryKey(runs: McpRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "message.mcpActivityFailedMany";
-  return active && runs.some((run) => run.status === "running")
-    ? "message.mcpActivityRunningMany"
-    : "message.mcpActivityRanMany";
-}
-
-function mcpActivityManySummaryDefault(runs: McpRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "{{count}} MCP calls failed";
-  return `${active && runs.some((run) => run.status === "running") ? "Using" : "Used"} {{count}} MCP tools`;
 }
 
 function mcpRunLabelKey(run: McpRunSummary, active: boolean): string {
@@ -1515,18 +1450,6 @@ function fileActivityVerb(editing: boolean, failed: boolean, deleted: boolean): 
   if (failed) return "Failed";
   if (deleted) return editing ? "Deleting" : "Deleted";
   return editing ? "Editing" : "Edited";
-}
-
-function fileActivitySummaryKey(editing: boolean, failed: boolean, deleted: boolean): string {
-  if (failed) return "message.fileActivityFailedOne";
-  if (deleted) return editing ? "message.fileActivityDeletingOne" : "message.fileActivityDeletedOne";
-  return editing ? "message.fileActivityEditingOne" : "message.fileActivityEditedOne";
-}
-
-function fileActivityManySummaryKey(editing: boolean, failed: boolean, deleted: boolean): string {
-  if (failed) return "message.fileActivityFailedMany";
-  if (deleted) return editing ? "message.fileActivityDeletingMany" : "message.fileActivityDeletedMany";
-  return editing ? "message.fileActivityEditingMany" : "message.fileActivityEditedMany";
 }
 
 function fileEditCallKey(edit: UIFileEdit): string {
@@ -1700,6 +1623,14 @@ function CliRunGroup({
   );
 }
 
+function CliTextIcon({ className }: { className?: string }) {
+  return (
+    <span className={cn("font-mono text-[9px] font-bold leading-none", className)}>
+      &gt;_
+    </span>
+  );
+}
+
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
   const { t } = useTranslation();
   const [logoIndex, setLogoIndex] = useState(0);
@@ -1709,9 +1640,15 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const color = failed ? "#DC2626" : app?.brand_color || "#0891B2";
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const logoUrl = logoUrls[logoIndex];
-  const label = t(cliRunLabelKey(run, active), {
+  const labelText = t(cliRunLabelKey(run, active), {
     defaultValue: cliRunLabelDefault(run, active),
   });
+  const detail = `@${run.name}${args ? ` ${args}` : ""}${run.error ? ` · ${run.error}` : ""}`;
+  const labelColor = failed
+    ? "text-red-600 dark:text-red-400"
+    : rowActive
+      ? "text-sky-600 dark:text-sky-400"
+      : "text-emerald-500/75";
 
   useEffect(() => setLogoIndex(0), [app?.logo_url]);
 
@@ -1720,70 +1657,32 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
       as="li"
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
-      title={`${label} @${run.name}${args ? ` ${args}` : ""}${run.error ? ` ${run.error}` : ""}`}
-      label={label}
-      marker={(
+      label={labelText}
+      detail={detail}
+      labelClassName={labelColor}
+      marker={logoUrl ? (
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border bg-background",
             rowActive && "animate-pulse",
           )}
           style={{
             borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
             boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
           }}
           aria-hidden
         >
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt=""
-              className="h-[78%] w-[78%] object-contain"
-              onError={() => setLogoIndex((index) => index + 1)}
-            />
-          ) : app ? (
-            cliAppInitials(app).slice(0, 2)
-          ) : (
-            <Terminal className="h-3 w-3" aria-hidden />
-          )}
+          <img
+            src={logoUrl}
+            alt=""
+            className="h-[78%] w-[78%] object-contain"
+            onError={() => setLogoIndex((index) => index + 1)}
+          />
         </span>
-      )}
-    >
-      <div className="-mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="max-w-[11rem] shrink-0 truncate font-mono text-[12.5px] font-semibold text-foreground/90">
-          @{run.name}
-        </span>
-        {failed ? (
-          <AlertCircle className="h-3 w-3 shrink-0 translate-y-[0.16em] text-destructive/75" aria-hidden />
-        ) : null}
-        {args ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/36">·</span>
-            <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground/72">
-              {args}
-            </span>
-          </>
-        ) : null}
-        {run.error ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/30">·</span>
-            <span className="min-w-0 truncate text-[12px] text-destructive/72">
-              {run.error}
-            </span>
-          </>
-        ) : null}
-        {run.workingDir && !run.error ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/30">·</span>
-            <span className="min-w-0 truncate text-[12px] text-muted-foreground/55">
-              {run.workingDir}
-            </span>
-          </>
-        ) : null}
-      </div>
-    </ActivityStep>
+      ) : undefined}
+      icon={logoUrl ? undefined : CliTextIcon as unknown as LucideIcon}
+    />
   );
 }
 
@@ -1791,10 +1690,12 @@ function McpRunGroup({
   runs,
   active,
   mcpPresetsByName,
+  toolEvent,
 }: {
   runs: McpRunSummary[];
   active: boolean;
   mcpPresetsByName: Map<string, McpPresetInfo>;
+  toolEvent?: ToolProgressEvent;
 }) {
   if (runs.length === 0) return null;
   return (
@@ -1805,24 +1706,33 @@ function McpRunGroup({
           run={run}
           active={active}
           preset={mcpPresetsByName.get(run.presetName.toLowerCase())}
+          toolEvent={toolEvent}
         />
       ))}
     </ul>
   );
 }
 
-function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
+function McpRunRow({ run, active, preset, toolEvent }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo; toolEvent?: ToolProgressEvent }) {
   const { t } = useTranslation();
   const [logoIndex, setLogoIndex] = useState(0);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
   const logoUrls = useMemo(() => logoFallbackUrls(preset?.logo_url), [preset?.logo_url]);
   const logoUrl = logoUrls[logoIndex];
   const displayName = preset?.display_name || run.displayName;
-  const label = t(mcpRunLabelKey(run, active), {
+  const labelText = t(mcpRunLabelKey(run, active), {
     defaultValue: mcpRunLabelDefault(run, active),
   });
+  const detail = `${displayName} · ${run.toolName}${run.argsPreview ? ` ${run.argsPreview}` : ""}${run.error ? ` · ${run.error}` : ""}`;
+  const labelColor = failed
+    ? "text-red-600 dark:text-red-400"
+    : rowActive
+      ? "text-sky-600 dark:text-sky-400"
+      : "text-emerald-500/75";
+  const showDetails = toolEvent && hasToolCallDetails(toolEvent);
 
   useEffect(() => setLogoIndex(0), [preset?.logo_url]);
 
@@ -1831,58 +1741,46 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
       as="li"
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
-      title={`${label} ${displayName} ${run.toolName}${run.argsPreview ? ` ${run.argsPreview}` : ""}${run.error ? ` ${run.error}` : ""}`}
-      label={label}
-      marker={(
+      label={labelText}
+      detail={detail}
+      labelClassName={labelColor}
+      onClick={showDetails ? () => setDetailsOpen(!detailsOpen) : undefined}
+      aside={
+        showDetails ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setDetailsOpen(!detailsOpen); }}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground/55 hover:text-muted-foreground/80 transition-colors shrink-0"
+            aria-label={detailsOpen ? "Hide details" : "Show details"}
+          >
+            {detailsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+        ) : undefined
+      }
+      marker={logoUrl ? (
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border bg-background",
             rowActive && "animate-pulse",
           )}
           style={{
             borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
             boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
           }}
           aria-hidden
         >
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt=""
-              className="h-[78%] w-[78%] object-contain"
-              onError={() => setLogoIndex((index) => index + 1)}
-            />
-          ) : preset ? (
-            mcpPresetInitials(preset).slice(0, 2)
-          ) : (
-            <Server className="h-3 w-3" aria-hidden />
-          )}
+          <img
+            src={logoUrl}
+            alt=""
+            className="h-[78%] w-[78%] object-contain"
+            onError={() => setLogoIndex((index) => index + 1)}
+          />
         </span>
-      )}
+      ) : undefined}
+      icon={logoUrl ? undefined : Server}
     >
-      <div className="-mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="max-w-[12rem] shrink-0 truncate text-[12.5px] font-semibold text-foreground/90">
-          {displayName}
-        </span>
-        {failed ? (
-          <AlertCircle className="h-3 w-3 shrink-0 translate-y-[0.16em] text-destructive/75" aria-hidden />
-        ) : null}
-        <span className="shrink-0 text-muted-foreground/36">·</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground/72">
-          {run.toolName}
-          {run.argsPreview ? ` · ${run.argsPreview}` : ""}
-        </span>
-        {run.error ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/30">·</span>
-            <span className="min-w-0 truncate text-[12px] text-destructive/72">
-              {run.error}
-            </span>
-          </>
-        ) : null}
-      </div>
+      {detailsOpen && toolEvent ? <ToolCallDetailContent event={toolEvent} /> : null}
     </ActivityStep>
   );
 }
