@@ -41,10 +41,16 @@ export function SkillLoadRow({ name, active, phase = "start", toolEvent }: Skill
           ? "text-red-600 dark:text-red-400"
           : running
             ? "text-indigo-600 dark:text-indigo-400"
-            : "text-emerald-500/75"
+            : "text-[rgb(251,146,60)]"
       }
       icon={Zap}
-      markerClassName={running ? "border-indigo-500/28 text-indigo-500/78" : undefined}
+      markerClassName={
+        running
+          ? "border-indigo-500/28 text-indigo-500/78"
+          : done
+            ? "border-[rgb(251,146,60)]/28 text-[rgb(251,146,60)]/78"
+            : undefined
+      }
       onClick={showDetails ? () => setDetailsOpen(!detailsOpen) : undefined}
       aside={
         showDetails ? (

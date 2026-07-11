@@ -42,6 +42,7 @@ import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider
 import type {
   ChatSummary,
   SettingsPayload,
+  SkillSummary,
   SlashCommand,
   UIMessage,
   WorkspaceScopePayload,
@@ -159,6 +160,7 @@ interface ThreadShellProps {
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
   onOpenModelSettings?: () => void;
+  skills?: SkillSummary[];
 }
 
 function toModelBadgeLabel(modelName: string | null): string | null {
@@ -309,6 +311,7 @@ export function ThreadShell({
   onWorkspaceScopeChange,
   settingsSnapshot = null,
   onOpenModelSettings,
+  skills = [],
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
@@ -788,6 +791,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          skills={skills}
           onStop={stop}
           onTranscribeAudio={transcribeAudio}
           goalState={goalState}
@@ -819,6 +823,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          skills={skills}
           onTranscribeAudio={transcribeAudio}
           goalState={goalState}
           workspaceScope={workspaceScope}

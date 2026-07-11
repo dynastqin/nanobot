@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type { CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SkillSummary, SlashCommand } from "@/lib/types";
 
 vi.mock("@/lib/imageEncode", () => ({
   encodeImage: vi.fn(async (file: File) => ({
@@ -1045,6 +1045,36 @@ describe("ThreadComposer", () => {
         brand_color: "#111827",
       }],
     });
+  });
+
+  it("opens skills only from a $ reference anywhere", () => {
+    render(
+        <ThreadComposer
+          onSend={vi.fn()}
+          placeholder="Type your message..."
+          skills={[{
+            name: "github",
+            description: "Work with pull requests and issues",
+            source: "builtin",
+            available: true,
+          }]}
+          slashCommands={COMMANDS}
+        />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+
+    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("Work with pull requests and issues");
+    expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("please use $github ");
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {

@@ -530,6 +530,66 @@
     }
   }
 
+  /* Flowing border for the chat composer while the agent is working.
+     A thin gradient border sweeps around the input area to signal that
+     the agent is still processing and hasn't stalled. */
+  @keyframes composer-streaming-flow {
+    0% { background-position: 200% 50%; }
+    100% { background-position: -200% 50%; }
+  }
+
+  .composer-streaming::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    padding: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--primary) / 0.08) 10%,
+      hsl(var(--primary) / 0.32) 30%,
+      hsl(var(--primary) / 0.08) 50%,
+      transparent 70%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: composer-streaming-flow 3s ease-in-out infinite;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .dark .composer-streaming::before {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--primary) / 0.10) 10%,
+      hsl(var(--primary) / 0.36) 30%,
+      hsl(var(--primary) / 0.10) 50%,
+      transparent 70%,
+      transparent 100%
+    );
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-streaming::before {
+      animation: none;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        hsl(var(--primary) / 0.14) 30%,
+        hsl(var(--primary) / 0.14) 44%,
+        transparent 58%,
+        transparent 100%
+      );
+      background-size: 200% 100%;
+    }
+  }
+
   /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;

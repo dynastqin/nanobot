@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  AlertCircle,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -860,15 +859,19 @@ function ActivityTraceRow({
     ? <>{trace.label}<span className="font-normal text-muted-foreground/55"> [{trace.provider}]</span></>
     : trace.label;
 
+  const labelColor = trace.error
+    ? "text-red-600 dark:text-red-400"
+    : traceLabelColor(trace.provider ? `Searching [${trace.provider}]` : trace.label);
+
   return (
     <ActivityStep
       as="li"
       marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={active} />}
-      active={active && trace.kind !== "done"}
-      tone={trace.kind === "done" ? "success" : active ? "active" : "neutral"}
+      active={active && trace.kind !== "done" && !trace.error}
+      tone={trace.error ? "error" : trace.kind === "done" ? "success" : active ? "active" : "neutral"}
       label={labelNode}
       detail={trace.detail}
-      labelClassName={traceLabelColor(trace.provider ? `Searching [${trace.provider}]` : trace.label)}
+      labelClassName={labelColor}
       onClick={showDetails ? () => setDetailsOpen(!detailsOpen) : undefined}
       aside={
         showDetails ? (
@@ -931,6 +934,7 @@ interface TraceDescription {
   url?: string;
   host?: string;
   provider?: string;
+  error?: boolean;
 }
 
 function TraceIconMark({
@@ -971,11 +975,13 @@ function TraceIconMark({
     <FallbackIcon
       className={cn(
         "h-3.5 w-3.5 shrink-0",
-        trace.kind === "done"
-          ? "text-emerald-500/75"
-          : active
-            ? "text-muted-foreground/75"
-            : "text-muted-foreground/45",
+        trace.error
+          ? "text-red-500/80"
+          : trace.kind === "done"
+            ? "text-emerald-500/75"
+            : active
+              ? "text-muted-foreground/75"
+              : "text-muted-foreground/45",
       )}
       aria-hidden
     />
@@ -988,6 +994,38 @@ function extractProviderFromResult(result: unknown): string | undefined {
   return match?.[1] || undefined;
 }
 
+function extractPlanTitle(result: unknown): string {
+  if (typeof result !== "string") return "";
+  const match = result.match(/^# Plan:\s*(.+)$/m);
+  return match?.[1]?.trim() ?? "";
+}
+
+function previewToolEventDetail(event?: ToolProgressEvent): string {
+  if (!event) return "";
+  const args = parseToolEventArguments(event);
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "";
+  const record = args as Record<string, unknown>;
+  const parts: string[] = [];
+  const action = record.action;
+  if (typeof action === "string" && action.trim()) {
+    parts.push(action.trim());
+  }
+  // Title from arguments (e.g. plan create), or extracted from result (e.g. plan update)
+  const title = (typeof record.title === "string" && record.title.trim())
+    || extractPlanTitle(event.result);
+  if (title) {
+    parts.push(truncateMiddle(title, 60));
+  }
+  return parts.join(": ");
+}
+
+function toolEventHasError(event?: ToolProgressEvent): boolean {
+  if (!event) return false;
+  if (event.phase === "error") return true;
+  if (event.error != null) return true;
+  return false;
+}
+
 function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDescription {
   const trimmed = line.trim();
   const functionMatch = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
@@ -997,9 +1035,10 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
   const webDetail = parsedUrl ? formatTraceUrl(parsedUrl) : "";
   const plainWebReadTrace =
     !!parsedUrl && /\b(fetch(?:ing|ed)?|read(?:ing)?|opened?|opening)\b/i.test(trimmed);
+  const errored = toolEventHasError(toolEvent);
   if (/search/i.test(name)) {
     const provider = extractProviderFromResult(toolEvent?.result);
-    return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed), provider };
+    return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed), provider, error: errored };
   }
   if (/fetch|read|open/i.test(name) || plainWebReadTrace) {
     return {
@@ -1008,6 +1047,7 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
       detail: webDetail || previewTraceDetail(args, trimmed),
       url: parsedUrl?.href,
       host: parsedUrl ? displayHost(parsedUrl.hostname) : undefined,
+      error: errored,
     };
   }
   if (isShellTraceName(name)) {
@@ -1015,15 +1055,17 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
       kind: "tool",
       label: "Command",
       detail: previewShellTraceDetail(args, trimmed),
+      error: errored,
     };
   }
   if (name) {
-    return { kind: "tool", label: "Using", detail: name };
+    const argsDetail = previewToolEventDetail(toolEvent);
+    return { kind: "tool", label: "Using", detail: argsDetail ? `${name} · ${argsDetail}` : name, error: errored };
   }
   if (/done|complete|success/i.test(trimmed)) {
     return { kind: "done", label: "Done", detail: trimmed };
   }
-  return { kind: "trace", label: "Working", detail: trimmed };
+  return { kind: "trace", label: "Working", detail: trimmed, error: errored };
 }
 
 function isShellTraceName(name: string): boolean {

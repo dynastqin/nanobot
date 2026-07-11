@@ -33,6 +33,7 @@ import {
   GripVertical,
   History,
   ImageIcon,
+  Info,
   Loader2,
   Mic,
   Plus,
@@ -44,6 +45,7 @@ import {
   Trash2,
   Undo2,
   X,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -84,6 +86,7 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   PlanStateWsPayload,
+  SkillSummary,
   SlashCommand,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -177,6 +180,7 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  skills?: SkillSummary[];
   onStop?: () => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
@@ -204,6 +208,7 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
   square: Square,
   "square-pen": SquarePen,
   "undo-2": Undo2,
+  zap: Zap,
 };
 
 const SLASH_PALETTE_GAP_PX = 8;
@@ -602,6 +607,7 @@ export function ThreadComposer({
   slashCommands = [],
   cliApps = [],
   mcpPresets = [],
+  skills = [],
   onStop,
   onTranscribeAudio,
   goalState,
@@ -769,6 +775,19 @@ export function ThreadComposer({
     return commandToken.toLowerCase();
   }, [disabled, slashMenuDismissed, value]);
 
+  const skillQuery = useMemo(() => {
+    if (disabled || slashMenuDismissed) return null;
+    const caret = Math.min(Math.max(cursorPosition, 0), value.length);
+    const beforeCaret = value.slice(0, caret);
+    const match = /\$([A-Za-z0-9_-]*)$/i.exec(beforeCaret);
+    if (!match) return null;
+    return {
+      end: caret,
+      start: match.index,
+      text: match[1].toLowerCase(),
+    };
+  }, [cursorPosition, disabled, slashMenuDismissed, value]);
+
   const visibleSlashCommands = useMemo(() => {
     const baseCommands = slashCommands.filter((command) => command.command !== "/stop");
     if (!(isStreaming && onStop)) return baseCommands;
@@ -785,6 +804,31 @@ export function ThreadComposer({
   }, [isStreaming, onStop, slashCommands]);
 
   const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
+    if (skillQuery !== null) {
+      const query = skillQuery.text;
+      return skills
+        .filter((skill) => skill.available)
+        .filter((skill) => {
+          const haystack = [
+            skill.name,
+            skill.description,
+          ].join(" ").toLowerCase();
+          return haystack.includes(query);
+        })
+        .map((skill) => {
+          const command = `$${skill.name}`;
+          const description = skill.description || skill.name;
+          return {
+            command,
+            title: skill.name,
+            description,
+            detail: description,
+            icon: "zap",
+            recent: recentSlashCommands.includes(command),
+          };
+        })
+        .slice(0, 8);
+    }
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands
       .filter((command) => {
@@ -849,7 +893,7 @@ export function ThreadComposer({
 
     return withDetails
       .slice(0, 8);
-  }, [goalState?.active, isStreaming, modelLabel, recentSlashCommands, slashQuery, t, visibleSlashCommands]);
+  }, [goalState?.active, isStreaming, modelLabel, recentSlashCommands, skills, skillQuery, slashQuery, t, visibleSlashCommands]);
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
@@ -1092,7 +1136,7 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const chooseSlashCommand = useCallback(
-    (command: SlashCommand) => {
+    (command: SlashPaletteCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
         onStop();
         setValue("");
@@ -1110,13 +1154,28 @@ export function ThreadComposer({
       setRecentSlashCommands(nextRecents);
       storeSlashRecents(nextRecents);
 
-      setValue(command.argHint ? `${command.command} ` : command.command);
+      if (skillQuery !== null) {
+        const suffix = value.slice(skillQuery.end);
+        const inserted = `${command.command}${suffix.startsWith(" ") ? "" : " "}`;
+        const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
+        const nextCursor = skillQuery.start + inserted.length;
+        setValue(next);
+        setCursorPosition(nextCursor);
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.focus();
+          el.setSelectionRange(nextCursor, nextCursor);
+        });
+      } else {
+        setValue(command.argHint ? `${command.command} ` : command.command);
+      }
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
     },
-    [isStreaming, onStop, recentSlashCommands, resizeTextarea],
+    [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
   );
 
   const chooseMentionCandidate = useCallback(
@@ -1515,6 +1574,7 @@ export function ThreadComposer({
         className={cn(
           "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           "after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:border after:border-blue-300/75 after:opacity-0 after:transition-opacity after:duration-200 focus-within:after:opacity-100 dark:after:border-blue-400/55",
+          isStreaming && "composer-streaming",
           isHero
             ? cn(
                 "max-w-[58rem] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]",
@@ -2335,6 +2395,7 @@ function SlashCommandPalette({
           const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
             defaultValue: command.description,
           });
+          const isSkill = command.command.startsWith("$");
           return (
             <button
               key={command.command}
@@ -2363,23 +2424,40 @@ function SlashCommandPalette({
                 <Icon className="h-4 w-4" />
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-                <span className="min-w-0 truncate text-[13.5px] font-semibold tracking-normal text-foreground">
+                <span className={cn(
+                  "text-[13.5px] font-semibold tracking-normal text-foreground",
+                  isSkill ? "shrink-0 whitespace-nowrap" : "min-w-0 truncate",
+                )}>
                   {title}
                 </span>
                 <span className="min-w-0 truncate text-[13px] text-muted-foreground">
                   {command.detail || description}
                 </span>
-              </span>
-              <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
-                {command.badge || command.recent ? (
-                  <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
-                    {command.badge ?? t("thread.composer.slash.badges.recent")}
-                  </span>
+                {isSkill && (command.detail || description) ? (
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-3 w-3 shrink-0 cursor-help text-muted-foreground/50" />
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={12} className="max-w-xs">
+                        {command.detail || description}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 ) : null}
-                <span className="font-mono text-[12px] text-muted-foreground/60">
-                  {command.argHint ? `${command.command} ${command.argHint}` : command.command}
-                </span>
               </span>
+              {isSkill ? null : (
+                <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
+                  {command.badge || command.recent ? (
+                    <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
+                      {command.badge ?? t("thread.composer.slash.badges.recent")}
+                    </span>
+                  ) : null}
+                  <span className="font-mono text-[12px] text-muted-foreground/60">
+                    {command.argHint ? `${command.command} ${command.argHint}` : command.command}
+                  </span>
+                </span>
+              )}
             </button>
           );
         })}
