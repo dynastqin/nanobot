@@ -211,11 +211,11 @@ export type ActivityItemType = "reasoning" | "tool" | "cli" | "mcp" | "file_edit
 - **label**: 状态文本（Loading / Loaded / Failed）
 - **marker**: `Zap` 图标
   - 运行中：`border-indigo-500/28 text-indigo-500/78`
-  - 完成：绿色 success tone
+  - 完成：`border-[rgb(251,146,60)]/28 text-[rgb(251,146,60)]/78`
   - 失败：红色 error tone
 - **label 颜色**:
   - 运行中：`text-indigo-600 dark:text-indigo-400`
-  - 完成：`text-emerald-500/75`
+  - 完成：`text-[rgb(251,146,60)]`
   - 失败：`text-red-600 dark:text-red-400`
 
 ## 核心组件
