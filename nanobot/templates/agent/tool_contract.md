@@ -21,13 +21,29 @@ Tool signatures are provided automatically via function calling. This section do
 - Use `head_limit` and `offset` to page across large result sets.
 - Binary or oversized files may be skipped to keep results readable.
 
+{% raw %}## File Write Gate (MANDATORY)
+
+**Before calling `write_file`, you MUST estimate the content size.** Use one of:
+- Line count: `wc -l <file>` or count lines from `read_file` output
+- Char count: `${#content}` in shell, or eyeball if content is from `read_file` (line count × ~60 chars/line as rough estimate)
+
+```
+Content > 200 lines OR > 16,000 chars?
+├─ YES → STOP. Read skills/chunked-write-file/SKILL.md, then use heredoc+stdin pattern.
+│        Do NOT call write_file. Do NOT retry write_file on oversized content.
+└─ NO  → write_file is safe. Proceed.
+```
+
+This gate applies to ALL write operations: new files, full rewrites, generated HTML, pasted content — no exceptions. If you skip this check and write_file fails or truncates, you are wasting the user's time.
+{% endraw %}
+
 ## File and Coding Workflows
 
 - For code or config changes, the default loop is: locate (`find_files`/`grep`), inspect (`read_file`), edit (`apply_patch`), then verify (`exec` or re-read).
 - Use `apply_patch` as the default code editing tool, especially for multi-file changes, structural edits, generated code, moves, adds, or deletes.
 - Use `apply_patch dry_run=true` when the patch is uncertain and you want validation plus a change summary before writing.
 - Use `edit_file` only for small exact replacements in one file, with `old_text` copied from `read_file`; add `occurrence`, `line_hint`, or `expected_replacements` when ambiguity matters.
-- Use `write_file` for new files or intentional full-file rewrites, not routine partial edits.
+- Use `write_file` for new files or intentional full-file rewrites, not routine partial edits. Must pass the File Write Gate above before every call.
 - If `apply_patch` or `edit_file` fails, re-read with `force=true`, narrow the context, and try a smaller patch rather than switching to shell `sed` or `echo`.
 
 ## Process Execution
