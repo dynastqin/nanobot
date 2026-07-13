@@ -659,6 +659,8 @@ class LLMProvider(ABC):
             kwargs.get("tool_choice"),
         )
         logger.info("[LLM {} Request] messages={}", tag, messages)
+        if tools:
+            logger.info("[LLM {} Request] tools={}", tag, tools)
 
     def _log_llm_response(self, tag: str, model: str, response: LLMResponse, elapsed: float) -> None:
         """Log an LLM response at INFO level (summary) and DEBUG level (full content)."""

@@ -52,6 +52,7 @@ _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/import": "import",
     "/api/settings/mcp-presets/import-cursor": "import-cursor",
     "/api/settings/mcp-presets/tools": "tools",
+    "/api/settings/mcp-presets/retry": "retry",
 }
 
 

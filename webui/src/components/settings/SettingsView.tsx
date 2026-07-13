@@ -1514,7 +1514,7 @@ export function SettingsView({
   };
 
   const handleMcpPresetAction = async (
-    action: "enable" | "remove" | "test",
+    action: "enable" | "remove" | "test" | "retry",
     name: string,
     values: Record<string, string> = {},
   ) => {
@@ -5347,7 +5347,7 @@ function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-  onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onMcpAction: (action: "enable" | "remove" | "test" | "retry", name: string, values?: Record<string, string>) => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
   onMcpFieldChange: (presetName: string, fieldName: string, value: string) => void;
@@ -5655,7 +5655,7 @@ function McpAppsCatalogRow({
   actionKey: string | null;
   showBrandLogos: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
-  onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onAction: (action: "enable" | "remove" | "test" | "retry", name: string, values?: Record<string, string>) => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
   onSelectDetail: (preset: McpPresetInfo) => void;
 }) {
@@ -5980,7 +5980,7 @@ function McpDetailSheet({
   onOpenChange: (open: boolean) => void;
   showBrandLogos: boolean;
   onToggle: (name: string, enable: boolean) => void;
-  onAction: (action: "enable" | "remove" | "test", name: string) => void;
+  onAction: (action: "enable" | "remove" | "test" | "retry", name: string) => void;
   actionKey: string | null;
 }) {
   const { t } = useTranslation();
@@ -6006,9 +6006,11 @@ function McpDetailSheet({
     : tx("settings.mcp.sourceBuiltin", "Built-in");
   const testBusy = actionKey === `test:${preset.name}`;
   const removeBusy = actionKey === `remove:${preset.name}`;
-  const busy = testBusy || removeBusy || toggling;
+  const retryBusy = actionKey === `retry:${preset.name}`;
+  const busy = testBusy || removeBusy || toggling;  // retry is not "busy" so it doesn't block other actions
 
   const handleTest = () => onAction("test", preset.name);
+  const handleRetry = () => onAction("retry", preset.name);
 
   const handleRemoveConfirm = () => {
     onAction("remove", preset.name);
@@ -6231,7 +6233,7 @@ function McpDetailSheet({
           </div>
 
           {preset.installed ? (
-            <div className="mt-5 border-t border-border/45 pt-4">
+            <div className="mt-5 border-t border-border/45 pt-4 flex items-center gap-2">
               <Button
                 type="button"
                 size="sm"
@@ -6246,6 +6248,22 @@ function McpDetailSheet({
                   <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                 )}
                 {tx("settings.mcp.test", "Test")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={testBusy || removeBusy || toggling}
+                onClick={handleRetry}
+                className="h-9 rounded-full px-4 text-[13px] font-medium"
+                title={tx("settings.mcp.retryHint", "Re-read config and reconnect this MCP server")}
+              >
+                {retryBusy ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                )}
+                {tx("settings.mcp.retry", "Retry")}
               </Button>
             </div>
           ) : null}

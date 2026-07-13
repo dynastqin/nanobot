@@ -12,6 +12,7 @@ import {
 import {
   CliAppMentionToken,
   McpPresetMentionToken,
+  SkillMentionToken,
   cliAppInitials,
   mcpPresetInitials,
   splitCapabilityMentionSegments,
@@ -943,12 +944,16 @@ export function ThreadComposer({
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
+  const skillNames = useMemo(
+    () => skills.filter((s) => s.available).map((s) => s.name),
+    [skills],
+  );
   const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets),
-    [cliApps, mcpPresets, value],
+    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, skillNames),
+    [cliApps, mcpPresets, skillNames, value],
   );
   const hasMentionDecorations = mentionSegments.some(
-    (segment) => segment.kind === "cli" || segment.kind === "mcp",
+    (segment) => segment.kind === "cli" || segment.kind === "mcp" || segment.kind === "skill",
   );
   const activeCliMentionApps = useMemo(() => {
     const seen = new Set<string>();
@@ -2173,10 +2178,18 @@ function ComposerCliMentionOverlay({
             isHero={isHero}
           />
         );
-        return (
+        if (segment.kind === "mcp") return (
           <McpPresetMentionToken
             key={`mcp-${segment.preset.name}-${index}`}
             preset={segment.preset}
+            label={segment.text}
+            variant="composer"
+            isHero={isHero}
+          />
+        );
+        return (
+          <SkillMentionToken
+            key={`skill-${segment.name}-${index}`}
             label={segment.text}
             variant="composer"
             isHero={isHero}

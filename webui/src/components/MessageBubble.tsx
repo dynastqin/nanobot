@@ -47,6 +47,7 @@ interface MessageBubbleProps {
   showAssistantCopyAction?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  skillNames?: string[];
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   onForkFromHere?: () => void;
@@ -86,6 +87,7 @@ export function MessageBubble({
   showAssistantCopyAction = true,
   cliApps = [],
   mcpPresets = [],
+  skillNames = [],
   onOpenFilePreview,
   onOpenLink,
   onForkFromHere,
@@ -157,6 +159,7 @@ export function MessageBubble({
               text={message.content}
               cliApps={mentionCliApps}
               mcpPresets={mentionMcpPresets}
+              skillNames={skillNames}
             />
           </p>
         ) : null}

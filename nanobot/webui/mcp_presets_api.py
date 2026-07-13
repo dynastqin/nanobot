@@ -1295,6 +1295,17 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
     if action == "test":
         raise McpPresetError("MCP preset test must run through the async test action", status=500)
 
+    if action == "retry":
+        if name not in config.tools.mcp_servers:
+            raise McpPresetError("unknown MCP server", status=404)
+        display_name = _display_name_for(name, preset)
+        payload = mcp_presets_payload(last_action={
+            "ok": True,
+            "message": f"Reconnecting to {display_name}...",
+            "verification": ["hot_reload"],
+        })
+        return payload
+
     raise McpPresetError(f"unknown MCP preset action '{action}'", status=404)
 
 

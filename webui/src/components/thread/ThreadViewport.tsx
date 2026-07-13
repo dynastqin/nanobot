@@ -39,6 +39,7 @@ interface ThreadViewportProps {
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  skillNames?: string[];
   forkBoundaryMessageCount?: number | null;
   compaction?: CompactionInfo | null;
   hasMoreBefore?: boolean;
@@ -112,6 +113,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
+  skillNames = [],
   forkBoundaryMessageCount = null,
   compaction = null,
   hasMoreBefore = false,
@@ -515,6 +517,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  skillNames={skillNames}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   compaction={compaction}
                   onOpenFilePreview={onOpenFilePreview}

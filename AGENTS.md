@@ -6,14 +6,15 @@ nanobot is a lightweight, open-source AI agent framework written in Python with 
 
 ## Iron Rules
 
+- **NEVER run Python tests / lint with bare `python` or `pytest`. Always use `uv run`.** The project uses uv for dependency management. Running `python -m pytest` or `pytest` directly may use the wrong virtual environment and install unexpected dependencies. Correct: `uv run pytest tests/... -v` and `uv run ruff check nanobot/`.
 - **NEVER run web tests / dev server / build from the project root. Always `cd webui` first.** The root has no `package.json`; running `bun run test` or `vitest` from root creates a stale `node_modules/.vite/` cache at the project root. Correct: `cd webui && bun run test`.
 
 ## Development Commands
 
 ```bash
-# Python: run single test / lint
-pytest tests/test_openai_api.py::test_function -v
-ruff check nanobot/
+# Python: run single test / lint (always use uv run)
+uv run pytest tests/test_openai_api.py::test_function -v
+uv run ruff check nanobot/
 
 # WebUI: dev server (proxies API/WS to gateway :8765), build, test
 # Build outputs to ../nanobot/web/dist (bundled into the Python wheel)
