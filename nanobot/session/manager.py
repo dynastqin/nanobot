@@ -450,6 +450,8 @@ class SessionManager:
         session = self._load(key)
         if session is None:
             session = Session(key=key)
+            outputs_dir = self.workspace / outputs_dir_for_session(key)
+            ensure_dir(outputs_dir)
 
         self._cache[key] = session
         return session

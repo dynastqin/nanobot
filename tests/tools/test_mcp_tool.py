@@ -305,7 +305,7 @@ async def test_execute_returns_timeout_message() -> None:
 
     result = await wrapper.execute()
 
-    assert result == "(MCP tool call timed out after 0.01s)"
+    assert result == "Error: MCP tool call timed out after 0.01s"
 
 
 @pytest.mark.asyncio
@@ -317,7 +317,7 @@ async def test_execute_handles_server_cancelled_error() -> None:
 
     result = await wrapper.execute()
 
-    assert result == "(MCP tool call was cancelled)"
+    assert result == "Error: MCP tool call was cancelled"
 
 
 @pytest.mark.asyncio
@@ -348,7 +348,7 @@ async def test_execute_handles_generic_exception() -> None:
 
     result = await wrapper.execute()
 
-    assert result == "(MCP tool call failed: RuntimeError)"
+    assert result == "Error: MCP tool call failed: RuntimeError"
 
 
 def _make_tool_def(name: str) -> SimpleNamespace:
@@ -813,7 +813,7 @@ async def test_resource_wrapper_execute_handles_timeout() -> None:
 
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource), timeout=0.01)
     result = await wrapper.execute()
-    assert result == "(MCP resource read timed out after 0.01s)"
+    assert result == "Error: MCP resource read timed out after 0.01s"
 
 
 @pytest.mark.asyncio
@@ -823,7 +823,7 @@ async def test_resource_wrapper_execute_handles_error() -> None:
 
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource))
     result = await wrapper.execute()
-    assert result == "(MCP resource read failed: RuntimeError)"
+    assert result == "Error: MCP resource read failed: RuntimeError"
 
 
 # ---------------------------------------------------------------------------
@@ -899,7 +899,7 @@ async def test_prompt_wrapper_execute_handles_timeout() -> None:
 
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt), timeout=0.01)
     result = await wrapper.execute()
-    assert result == "(MCP prompt call timed out after 0.01s)"
+    assert result == "Error: MCP prompt call timed out after 0.01s"
 
 
 @pytest.mark.asyncio
@@ -922,7 +922,7 @@ async def test_prompt_wrapper_execute_handles_error() -> None:
 
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt))
     result = await wrapper.execute()
-    assert result == "(MCP prompt call failed: RuntimeError)"
+    assert result == "Error: MCP prompt call failed: RuntimeError"
 
 
 # ---------------------------------------------------------------------------

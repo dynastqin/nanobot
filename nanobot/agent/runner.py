@@ -401,15 +401,20 @@ class AgentRunner:
             response = await self._request_model(spec, messages_for_model, hook, context)
             context.response = response
             context.tool_calls = list(response.tool_calls)
+            # for tc in response.tool_calls:
+            #     logger.info("[tool_call] name={} args={}", tc.name, tc.arguments)
 
             reasoning_text, cleaned_content = extract_reasoning(
                 response.reasoning_content,
                 response.thinking_blocks,
                 response.content,
             )
+            if reasoning_text:
+                logger.info("[reasoning] {}", reasoning_text)
             response.content = cleaned_content
             raw_usage = self._usage_or_estimate(spec, messages_for_model, response)
             context.usage = dict(raw_usage)
+            logger.info("[token_usage] {}", raw_usage)
             self._accumulate_usage(usage, raw_usage)
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
@@ -838,9 +843,22 @@ class AgentRunner:
                 await live_file_edits.flush()
                 if response.should_execute_tools:
                     live_file_edits.apply_final_call_ids(response.tool_calls)
+                finish_reason = response.finish_reason or "unknown"
+                if finish_reason == "length":
+                    error_msg = (
+                        "Tool call did not complete: LLM response was truncated "
+                        "(token limit reached). Try reducing the file size or "
+                        "splitting into smaller writes."
+                    )
+                elif finish_reason == "content_filter":
+                    error_msg = "Tool call did not complete: content was filtered by safety systems."
+                else:
+                    error_msg = (
+                        f"Tool call did not complete (finish_reason: {finish_reason})."
+                    )
                 await live_file_edits.error_unmatched(
                     response.tool_calls if response.should_execute_tools else [],
-                    "Tool call did not complete.",
+                    error_msg,
                 )
         except asyncio.TimeoutError:
             if outer_timeout_s is None:

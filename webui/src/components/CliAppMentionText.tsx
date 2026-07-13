@@ -10,7 +10,8 @@ export type CliAppMentionSegment =
 
 export type CapabilityMentionSegment =
   | CliAppMentionSegment
-  | { kind: "mcp"; text: string; preset: McpPresetInfo };
+  | { kind: "mcp"; text: string; preset: McpPresetInfo }
+  | { kind: "skill"; text: string; name: string };
 
 export function cliAppInitials(app: CliAppInfo): string {
   const value = app.display_name || app.name;
@@ -76,8 +77,9 @@ export function splitCapabilityMentionSegments(
   value: string,
   cliApps: CliAppInfo[],
   mcpPresets: McpPresetInfo[] = [],
+  skillNames: string[] = [],
 ): CapabilityMentionSegment[] {
-  if (!value || (cliApps.length === 0 && mcpPresets.length === 0)) {
+  if (!value || (cliApps.length === 0 && mcpPresets.length === 0 && skillNames.length === 0)) {
     return value ? [{ kind: "text", text: value }] : [];
   }
   const cliAppsByName = new Map(
@@ -90,33 +92,51 @@ export function splitCapabilityMentionSegments(
       .filter((preset) => preset.installed && preset.configured)
       .map((preset) => [preset.name.toLowerCase(), preset]),
   );
-  if (cliAppsByName.size === 0 && mcpPresetsByName.size === 0) {
+  const skillNameSet = new Set(skillNames.map((n) => n.toLowerCase()));
+  if (cliAppsByName.size === 0 && mcpPresetsByName.size === 0 && skillNameSet.size === 0) {
     return [{ kind: "text", text: value }];
   }
 
   const segments: CapabilityMentionSegment[] = [];
-  const mentionRe = /(^|[\s([{])@([a-z0-9_-]+)\b/gi;
+  const mentionRe = /(^|[\s([{])[@$]([a-z0-9_-]+)\b/gi;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = mentionRe.exec(value)) !== null) {
     const prefix = match[1] ?? "";
     const name = match[2] ?? "";
     const key = name.toLowerCase();
-    const app = cliAppsByName.get(key);
-    const preset = app ? null : mcpPresetsByName.get(key);
-    if (!app && !preset) continue;
+    const delimiter = value[match.index + prefix.length];
+    if (delimiter === "@") {
+      const app = cliAppsByName.get(key);
+      const preset = app ? null : mcpPresetsByName.get(key);
+      if (!app && !preset) continue;
 
-    const mentionStart = match.index + prefix.length;
-    const mentionEnd = mentionStart + name.length + 1;
-    if (mentionStart > cursor) {
-      segments.push({ kind: "text", text: value.slice(cursor, mentionStart) });
+      const mentionStart = match.index + prefix.length;
+      const mentionEnd = mentionStart + name.length + 1;
+      if (mentionStart > cursor) {
+        segments.push({ kind: "text", text: value.slice(cursor, mentionStart) });
+      }
+      if (app) {
+        segments.push({ kind: "cli", text: value.slice(mentionStart, mentionEnd), app });
+      } else if (preset) {
+        segments.push({ kind: "mcp", text: value.slice(mentionStart, mentionEnd), preset });
+      }
+      cursor = mentionEnd;
+    } else if (delimiter === "$") {
+      if (!skillNameSet.has(key)) continue;
+
+      const mentionStart = match.index + prefix.length;
+      const mentionEnd = mentionStart + name.length + 1;
+      if (mentionStart > cursor) {
+        segments.push({ kind: "text", text: value.slice(cursor, mentionStart) });
+      }
+      segments.push({
+        kind: "skill",
+        text: value.slice(mentionStart, mentionEnd),
+        name: key,
+      });
+      cursor = mentionEnd;
     }
-    if (app) {
-      segments.push({ kind: "cli", text: value.slice(mentionStart, mentionEnd), app });
-    } else if (preset) {
-      segments.push({ kind: "mcp", text: value.slice(mentionStart, mentionEnd), preset });
-    }
-    cursor = mentionEnd;
   }
   if (cursor < value.length) {
     segments.push({ kind: "text", text: value.slice(cursor) });
@@ -128,13 +148,15 @@ export function CliAppMentionText({
   text,
   cliApps,
   mcpPresets = [],
+  skillNames = [],
 }: {
   text: string;
   cliApps: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  skillNames?: string[];
 }) {
-  const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets);
-  if (!segments.some((segment) => segment.kind === "cli" || segment.kind === "mcp")) return <>{text}</>;
+  const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets, skillNames);
+  if (!segments.some((segment) => segment.kind !== "text")) return <>{text}</>;
   return (
     <>
       {segments.map((segment, index) => {
@@ -149,10 +171,17 @@ export function CliAppMentionText({
             variant="message"
           />
         );
-        return (
+        if (segment.kind === "mcp") return (
           <McpPresetMentionToken
             key={`mcp-${segment.preset.name}-${index}`}
             preset={segment.preset}
+            label={segment.text}
+            variant="message"
+          />
+        );
+        return (
+          <SkillMentionToken
+            key={`skill-${segment.name}-${index}`}
             label={segment.text}
             variant="message"
           />
@@ -274,6 +303,40 @@ export function McpPresetMentionToken({
             />
           </span>
         ) : null}
+      </span>
+      {mentionName}
+    </span>
+  );
+}
+
+export function SkillMentionToken({
+  label,
+  variant,
+  isHero: _isHero = false,
+}: {
+  label: string;
+  variant: "composer" | "message";
+  isHero?: boolean;
+}) {
+  const color = "rgb(251, 143, 60)";
+  const mentionName = label.startsWith("$") ? label.slice(1) : label;
+  const testIdPrefix = variant === "composer" ? "composer" : "message";
+
+  return (
+    <span
+      data-testid={`${testIdPrefix}-skill-mention-${mentionName}`}
+      title={`Skill: ${mentionName}`}
+      className="relative inline transition-[color,text-shadow] duration-150"
+      style={{
+        color,
+        textShadow: `0 0 10px ${alphaColor(color, 24)}`,
+      }}
+    >
+      <span
+        className="relative inline-block"
+        style={{ lineHeight: "inherit" }}
+      >
+        $
       </span>
       {mentionName}
     </span>

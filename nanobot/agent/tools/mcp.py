@@ -354,7 +354,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
                 )
-                return f"(MCP tool call timed out after {self._tool_timeout}s)"
+                return f"Error: MCP tool call timed out after {self._tool_timeout}s"
             except asyncio.CancelledError:
                 # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
@@ -362,7 +362,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return "(MCP tool call was cancelled)"
+                return "Error: MCP tool call was cancelled"
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -387,14 +387,14 @@ class MCPToolWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP tool call failed after retry: {type(exc).__name__})"
+                    return f"Error: MCP tool call failed after retry: {type(exc).__name__}"
                 logger.exception(
                     "MCP tool '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc,
                 )
-                return f"(MCP tool call failed: {type(exc).__name__})"
+                return f"Error: MCP tool call failed: {type(exc).__name__}"
             else:
                 # Success — extract result
                 parts = []
@@ -405,7 +405,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         parts.append(str(block))
                 return "\n".join(parts) or "(no output)"
 
-        return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
+        return "Error: MCP tool call failed"  # Unreachable, but satisfies type checkers
 
 
 class MCPResourceWrapper(_MCPWrapperBase):
@@ -457,13 +457,13 @@ class MCPResourceWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
                 )
-                return f"(MCP resource read timed out after {self._resource_timeout}s)"
+                return f"Error: MCP resource read timed out after {self._resource_timeout}s"
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
-                return "(MCP resource read was cancelled)"
+                return "Error: MCP resource read was cancelled"
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -487,14 +487,14 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP resource read failed after retry: {type(exc).__name__})"
+                    return f"Error: MCP resource read failed after retry: {type(exc).__name__}"
                 logger.exception(
                     "MCP resource '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc,
                 )
-                return f"(MCP resource read failed: {type(exc).__name__})"
+                return f"Error: MCP resource read failed: {type(exc).__name__}"
             else:
                 parts: list[str] = []
                 for block in result.contents:
@@ -506,7 +506,7 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         parts.append(str(block))
                 return "\n".join(parts) or "(no output)"
 
-        return "(MCP resource read failed)"  # Unreachable
+        return "Error: MCP resource read failed"  # Unreachable
 
 
 class MCPPromptWrapper(_MCPWrapperBase):
@@ -573,13 +573,13 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
                 )
-                return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+                return f"Error: MCP prompt call timed out after {self._prompt_timeout}s"
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
-                return "(MCP prompt call was cancelled)"
+                return "Error: MCP prompt call was cancelled"
             except McpError as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -594,7 +594,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
                     exc.error.code,
                     exc.error.message,
                 )
-                return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+                return f"Error: MCP prompt call failed: {exc.error.message} [code {exc.error.code}]"
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -618,14 +618,14 @@ class MCPPromptWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP prompt call failed after retry: {type(exc).__name__})"
+                    return f"Error: MCP prompt call failed after retry: {type(exc).__name__}"
                 logger.exception(
                     "MCP prompt '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc,
                 )
-                return f"(MCP prompt call failed: {type(exc).__name__})"
+                return f"Error: MCP prompt call failed: {type(exc).__name__}"
             else:
                 parts: list[str] = []
                 for message in result.messages:
@@ -642,7 +642,30 @@ class MCPPromptWrapper(_MCPWrapperBase):
                         parts.append(str(content))
                 return "\n".join(parts) or "(no output)"
 
-        return "(MCP prompt call failed)"  # Unreachable
+        return "Error: MCP prompt call failed"  # Unreachable
+
+
+async def _safe_aclose(stack: AsyncExitStack) -> None:
+    """Call stack.aclose() while suppressing asyncio "unretrieved exception" noise.
+
+    MCP client libraries (streamable_http_client, stdio_client) spawn background
+    tasks via anyio task groups. When a connection fails, those tasks are cancelled
+    and their exceptions are never retrieved, producing repetitive "Task exception
+    was never retrieved" messages. We temporarily silence those during cleanup.
+    """
+    loop = asyncio.get_running_loop()
+    old_handler = loop.get_exception_handler()
+
+    def _suppress(loop, context):
+        if context.get("message") != "Task exception was never retrieved":
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_suppress)
+    try:
+        with suppress(BaseException):
+            await stack.aclose()
+    finally:
+        loop.set_exception_handler(old_handler)
 
 
 async def connect_mcp_servers(
@@ -664,6 +687,8 @@ async def connect_mcp_servers(
         await server_stack.__aenter__()
 
         try:
+            logger.info("=" * 64)
+            logger.info("MCP server '{}': connecting start...", name)
             transport_type = cfg.type
             if not transport_type:
                 if cfg.command:
@@ -828,7 +853,7 @@ async def connect_mcp_servers(
             )
             return name, server_stack
 
-        except Exception as e:
+        except BaseException as e:
             hint = ""
             text = str(e).lower()
             if any(
@@ -845,9 +870,8 @@ async def connect_mcp_servers(
                     " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
-            logger.exception("MCP server '{}': failed to connect: {}", name, hint)
-            with suppress(Exception):
-                await server_stack.aclose()
+            logger.warning("MCP server '{}': failed to connect: {}{}", name, e, hint)
+            await _safe_aclose(server_stack)
             return name, None
 
     server_stacks: dict[str, AsyncExitStack] = {}
@@ -855,8 +879,8 @@ async def connect_mcp_servers(
     for name, cfg in mcp_servers.items():
         try:
             result = await connect_single_server(name, cfg)
-        except Exception as e:
-            logger.exception("MCP server '{}' connection failed: {}", name, e)
+        except BaseException as e:
+            logger.warning("MCP server '{}' connection failed: {}", name, e)
             continue
         if result is not None and result[1] is not None:
             server_stacks[result[0]] = result[1]
@@ -946,6 +970,26 @@ def refresh_mcp_servers_config(state: Any) -> set[str]:
     return {_tool_prefix(name) for name, cfg in next_servers.items() if getattr(cfg, "enabled", True)}
 
 
+def _refresh_missing_from_config(state: Any, missing_servers: dict) -> None:
+    """Update state._mcp_servers and missing_servers dict from current config file.
+
+    When a user fixes credentials in config.json, the in-memory cache
+    (state._mcp_servers) is stale. Re-read config so the next connection
+    attempt uses the updated values without requiring a restart.
+    """
+    try:
+        from nanobot.config.loader import load_config, resolve_config_env_vars
+
+        fresh = resolve_config_env_vars(load_config())
+        fresh_servers = dict(fresh.tools.mcp_servers)
+        for name in list(missing_servers):
+            if name in fresh_servers:
+                state._mcp_servers[name] = fresh_servers[name]
+                missing_servers[name] = fresh_servers[name]
+    except Exception:
+        pass  # Config unreadable; fall through with cached values
+
+
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
     missing_servers = {
@@ -956,6 +1000,9 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         return
     state._mcp_connecting = True
     try:
+        # Re-read config so credential fixes take effect without a restart.
+        _refresh_missing_from_config(state, missing_servers)
+
         connected = await connect_mcp_servers(missing_servers, registry)
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
