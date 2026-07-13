@@ -1,27 +1,30 @@
 # Artifact Share Link Feature
-> 待实现
 
 ## Context
 
-nanobot 的 Artifact 文件（存储在 `outputs_{session}` 目录中）目前只能在右侧抽屉面板中预览。用户希望能生成一个可直接在浏览器中打开的链接，类似分享功能，让文件可以被外部访问或在其他标签页中查看。
+nanobot 的 Artifact 文件（存储在 `<workspace>/outputs/<session>` 目录中，由 `outputs_dir_for_session()` 生成）目前只能在右侧抽屉面板中预览。用户希望能生成一个可直接在浏览器中打开的链接，类似分享功能，让文件可以被外部访问或在其他标签页中查看。
 
-当前系统已有 HMAC 签名的 media URL 机制（`/api/media/{sig}/{payload}`），用于图片/视频的内联展示。本方案复用该模式，扩展为支持工作区文件的可过期签名分享链接。
+### 关键需求
+
+- **默认永久分享**：用户点击 Share 按钮后，默认生成永久有效的分享链接
+- **用户可调整有效期**：提供 1 天 / 7 天 / 永久的选项
+- **分享结果展示**：弹窗中显示生成的 URL，可直接复制，并清晰展示有效期
+- **分享状态持久化**：已生成的分享链接在文件树中可见，无需重复生成
 
 ## Design
 
 ### Backend
 
-#### 0. Persistent gateway signing secret
+#### 0. Persistent gateway signing secret（预留）
 
 **`nanobot/config/gateway_secret.py`** — 新增模块
 
-引入 gateway 级别的持久签名密钥 `gateway_secret`，不仅限于 artifact share，未来任何需要跨重启持久化签名的功能均可复用。
+引入 gateway 级别的持久签名密钥 `gateway_secret`，供未来需要跨重启持久化签名的功能复用。当前 artifact share 采用 token 方案，暂不依赖此模块。
 
 - 文件路径: `~/.nanobot/data/gateway_secret`（一行 base64 编码的 32 字节随机数据）
 - 首次启动时: `secrets.token_bytes(32)` → base64 → 写入文件
 - 后续启动时: 直接读取文件内容 → base64 decode
 - 文件权限: `0o600`（仅 owner 可读写）
-- 与 media secret 分离 — media secret 仍为 per-startup（图片 URL 嵌在消息中，重启后重新生成合理）
 
 ```python
 def load_or_create_gateway_secret() -> bytes:
@@ -30,67 +33,77 @@ def load_or_create_gateway_secret() -> bytes:
 
 #### 1. New module: `nanobot/webui/artifact_share.py`
 
-核心签名/验证逻辑，复用 `media_api.py` 的 b64url 编解码和 HMAC 模式。
+核心逻辑：生成随机 token，将 token → 文件路径映射存储在 `.shares.json` 中。
 
-**签名 payload 格式**（base64url-encoded JSON）:
+**Token 方案**（非 HMAC 签名）:
+- 12 随机字节 → 24 hex 字符，96 bits 熵，不可枚举
+- URL 格式: `/api/artifacts/share?t=<token>`
+- Token → 文件映射存储在 session 的 outputs 目录下的 `.shares.json` 中
+
+**`.shares.json` 格式**（keyed by relative file path）:
 ```json
 {
-  "p": "outputs_websocket_abc123/report.md",  // 相对于 workspace 的路径
-  "e": 1719936000,                              // 过期时间 (Unix timestamp), 0 = 永久
-  "n": "report.md"                              // 原始文件名（用于 Content-Disposition）
+  "outputs/websocket_abc123/report.md": {
+    "token": "a1b2c3d4e5f6a7b8c9d0e1f2",
+    "url": "/api/artifacts/share?t=a1b2c3d4e5f6a7b8c9d0e1f2",
+    "expires_at": 1719936000,
+    "expires_in": 0,
+    "filename": "report.md"
+  }
 }
 ```
 
 **Key functions:**
 
-- `sign_artifact_path(abs_path, workspace_path, secret, expires_at, filename)` → `/api/artifacts/{sig}/{payload}`
-  - 验证路径在 workspace 内
-  - 构建 JSON payload → b64url encode → HMAC-SHA256 签名（取前 16 字节）
+- `create_artifact_token(abs_path, workspace_path, outputs_dir, expires_at, expires_in, filename)` → `/api/artifacts/share?t=<token>` or `None`
+  - 验证路径在 workspace 内（`resolve().relative_to()`）
+  - 生成随机 token → 写入 `.shares.json`
   - `expires_at=0` 表示永不过期
-  - 返回签名 URL 路径
+  - 返回 URL 路径字符串
 
-- `serve_signed_artifact(sig, payload, secret, workspace_path, request)` → `Response`
-  - 验证 HMAC 签名
-  - 检查过期时间（`e=0` 时跳过）
-  - 验证路径在 workspace 边界内（二次校验，防符号链接逃逸）
-  - 推断 MIME 类型，设置 `Content-Disposition: inline`
+- `serve_artifact_token(token, workspace_path, outputs_dir, request)` → `Response`
+  - 从 `.shares.json` 查找 token 对应的文件
+  - 检查过期时间（`expires_at=0` 时跳过）
+  - 通过 `resolve_allowed_path(strict=True)` 验证路径在 workspace 内
+  - 推断 MIME 类型，不在白名单中的降级为 `application/octet-stream`
   - 对 HTML/SVG 设置 restrictive CSP
   - 支持 HTTP byte ranges（复用 `_parse_single_byte_range`）
-  - 过期返回 410 Gone，签名无效返回 401
+  - token 未找到返回 404，过期返回 410 Gone
 
-- `ARTIFACT_INLINE_MIMES`: 允许的 inline MIME 类型白名单（image/*, text/*, application/pdf, application/json, video/* 等），不在白名单中的降级为 `application/octet-stream`（触发下载而非 inline）
+- `load_artifact_shares(outputs_dir)` → `dict[str, dict]` — 加载 `.shares.json`
+- `validate_expires_in(expires_in)` → `int | None` — 校验有效期值
 
-- **有效期选项**（前端 → 后端的 `expires_in` 值映射）:
+- `ARTIFACT_INLINE_MIMES`: 允许的 inline MIME 类型白名单（image/*, text/*, application/json, application/pdf, video/*, audio/* 等）
+
+- **有效期选项**:
   | 选项 | expires_in (秒) | 说明 |
   |------|----------------|------|
+  | 永久（**默认**） | 0 | 直到文件被删除或 `.shares.json` 被手动清除 |
   | 1 天 | 86400 | 临时分享 |
   | 7 天 | 604800 | 短期分享 |
-  | 永久 | 0 | 直到文件被删除或 gateway_secret 被手动重置 |
 
-- **永久链接说明**: "永久"指链接无过期时间。签名密钥 `gateway_secret` 持久化在磁盘上，跨 gateway 重启保持不变。"永久"链接在以下情况下失效：文件被删除、gateway_secret 被手动删除/重置。
+- **永久链接说明**: "永久"指链接无过期时间。token 映射持久化在 `.shares.json` 中，跨 gateway 重启保持不变。"永久"链接在文件被删除或 `.shares.json` 被清除时失效。
 
 #### 2. Gateway 集成
 
 **`nanobot/webui/media_gateway.py`** — `WebUIMediaGateway` 扩展:
-- 添加 `artifact_secret: bytes` 构造参数（从 `gateway_secret` 加载）
-- 添加 `sign_artifact_path(path, expires_at, filename)` 方法 — 使用 `self.artifact_secret` 签名
-- 添加 `serve_signed_artifact(sig, payload, request)` 方法 — 使用 `self.artifact_secret` 验证
-- media secret（`self.secret`）保持 per-startup 不变
-
-**`nanobot/webui/gateway_services.py`** — `build_gateway_services()` 更新:
-- 调用 `load_or_create_gateway_secret()` 获取持久 secret
-- 传入 `WebUIMediaGateway` 的 `artifact_secret` 参数
+- 添加 `create_artifact_token(abs_path, outputs_dir, expires_at, expires_in, filename)` 方法 — 委托给 `artifact_share.create_artifact_token()`
+- 添加 `serve_artifact_token(token, outputs_dir, request)` 方法 — 委托给 `artifact_share.serve_artifact_token()`
+- 无需新增构造参数（token 方案不依赖外部 secret）
 
 **`nanobot/webui/ws_http.py`** — `GatewayHTTPHandler` 路由:
 
 - **`_dispatch_media_routes`** 中新增:
   ```python
-  m = re.match(r"^/api/artifacts/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$", got)
+  m = re.match(r"^/api/artifacts/share$", got)
   if m:
-      return self._handle_artifact_fetch(m.group(1), m.group(2), request)
+      token = _query_first(_parse_query(request.path), "t") or ""
+      if token:
+          return self._handle_artifact_fetch(token, request)
+      return _http_error(400, "missing token")
   ```
-  - `_handle_artifact_fetch` 调用 `self.media.serve_signed_artifact()`
-  - **无需 API token**（签名即授权）
+  - `_handle_artifact_fetch` 扫描 `outputs/` 下所有子目录的 `.shares.json`，查找匹配 token
+  - **无需 API token**（token 即授权）
 
 - **`_dispatch_session_routes`** 中新增:
   ```python
@@ -99,120 +112,232 @@ def load_or_create_gateway_secret() -> bytes:
       return self._handle_artifact_share(request, m.group(1))
   ```
   - 需要 API token
-  - 接收 POST JSON: `{"path": "...", "expires_in": 86400}`
-  - `expires_in` 允许值: `86400`（1天）、`604800`（7天）、`0`（永久），其他值拒绝
+  - 接收 GET query params: `path` 和 `expires_in`
+  - `expires_in` 允许值: `0`（永久，默认）、`86400`（1天）、`604800`（7天）
   - 通过 workspace scope 解析路径
-  - 验证路径在 `outputs_` 目录内（或至少 workspace 内）
-  - 返回: `{"url": "/api/artifacts/...", "expires_at": 1719936000, "filename": "report.md"}`
+  - 验证路径在 `outputs/` 目录内
+  - 返回 JSON: `{"url": "/api/artifacts/share?t=...", "expires_at": 1719936000, "expires_in": 0, "filename": "report.md"}`
 
-#### 3. Security considerations
+#### 3. 文件树集成
+
+**`nanobot/webui/workspace_files.py`** — 文件树 API 扩展:
+- `_build_tree()` 新增 `shares_map` 和 `project_path` 参数
+- `_attach_share(node, shares_map, project_path)` — 如果文件有已存在的 share，将 share 信息附加到 tree node 的 `share` 字段
+- `list_workspace_files()` 在 session 上下文中自动加载 `.shares.json`，传入 tree builder
+- 前端可直接从文件树获取已有 share 信息，无需额外 API 调用
+
+#### 4. Security considerations
 
 | Threat | Mitigation |
 |--------|-----------|
 | Path traversal | `resolve_allowed_path(strict=True)` + 签名时存储相对路径 + 服务时二次验证 |
-| 链接过期 | payload 中包含 `exp` 时间戳，服务时检查，`e=0` 表示不过期 |
-| 签名伪造 | HMAC-SHA256，16 字节 MAC，timing-safe compare |
+| Token 枚举 | 12 字节随机 hex（96 bits 熵），不可暴力枚举 |
+| 链接过期 | `.shares.json` 中存储 `expires_at` 时间戳，服务时检查，`expires_at=0` 表示不过期 |
 | XSS via HTML | HTML 文件 serve 时设置 `Content-Security-Policy: sandbox; default-src 'self' 'unsafe-inline' data: blob:` |
-| XSS via SVG | 复用 media_api 的 SVG CSP: `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox` |
+| XSS via SVG | SVG 文件 serve 时设置 `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox` |
 | MIME sniffing | `X-Content-Type-Options: nosniff` |
-| 链接被暴力枚举 | URL 路径格式 `/api/artifacts/{sig}/{payload}`，sig 为 16 字节 HMAC，不可枚举 |
-| Secret 泄露 | `gateway_secret` 持久化在 `~/.nanobot/data/gateway_secret`，权限 `0o600`；手动删除该文件可立即失效所有已生成链接 |
-| 大文件 DoS | byte range 支持 + 不缓存大文件 |
+| Token 泄露 | token 仅在 URL query string 中，通过 HTTPS 传输保护；删除 `.shares.json` 可立即失效所有链接 |
+| 大文件 DoS | byte range 支持 |
 | expires_in 滥用 | 后端白名单校验仅允许 0/86400/604800 |
+| 分享范围限制 | 仅允许 `outputs/` 目录下的文件被分享 |
 
 ### Frontend
 
-#### 4. API function
+#### 5. API function
 
 **`webui/src/lib/api.ts`** — 新增:
 ```typescript
+interface ArtifactShareResult {
+  url: string;
+  expires_at: number;
+  expires_in: number;
+  filename: string;
+}
+
 async function createArtifactShare(
   token: string,
   sessionKey: string,
   path: string,
-  expiresIn: number,  // 0 | 86400 | 604800
-): Promise<{ url: string; expires_at: number; filename: string }>
+  expiresIn: number,
+  base?: string,
+): Promise<ArtifactShareResult>
 ```
+- 通过 GET query params 传递 `path` 和 `expires_in`
 
-#### 5. Share button component
+#### 6. Types
+
+**`webui/src/lib/types.ts`** — 新增:
+```typescript
+interface ArtifactShareInfo {
+  url: string;
+  expires_at: number;
+  expires_in: number;
+  filename: string;
+}
+```
+- `WorkspaceFileNode` 新增可选字段 `share?: ArtifactShareInfo`
+
+#### 7. Share button component
 
 **`webui/src/components/ArtifactShareButton.tsx`** — 新组件:
-- Props: `token, sessionKey, filePath, variant?: "icon" | "menu-item"`
-- 点击后弹出小 popover 选择有效期: **1 天 / 7 天 / 永久**
-- 调用 `createArtifactShare()`，构造完整 URL（`window.location.origin + response.url`）
-- 自动复制到剪贴板（使用 `@/lib/clipboard.ts` 的 `copyTextToClipboard`）
-- Copy → Check 动画反馈（复用 `LinkPreviewDrawer` 的模式）
-- Popover 内显示生成的链接（可手动复制）
 
-#### 6. 集成到现有 toolbar
+Props: `token, sessionKey, filePath, className?, variant?: "icon" | "icon-sm", initialShare?: ArtifactShareResult | null`
+
+**variant**: `"icon"`（默认，h-8 w-8）用于全屏预览；`"icon-sm"`（h-7 w-7）用于面板/抽屉工具栏
+
+**交互流程:**
+
+1. 点击 Share 按钮 → 弹出 Popover
+2. Popover 内容分为两个阶段：
+
+**阶段 1 — 创建分享（初始状态）：**
+- 有效期选择器（Segmented 按钮组）:
+  - **永久**（默认选中，`expires_in=0`）
+  - 1 天
+  - 7 天
+- "生成链接" 按钮（调用 `createArtifactShare()`）
+
+**阶段 2 — 分享结果（生成成功后）：**
+- 显示生成的完整 URL（`window.location.origin + url`），放在 code block 中
+- **有效期标签**：显示文字说明
+  - 永久 → "永久有效" / "Permanent"
+  - 有期限 → "有效期至 xxx" / "Expires at xxx"
+  - 已过期 → 显示 "已失效" / "Expired" 标记
+- **复制链接按钮**：点击复制完整 URL 到剪贴板（Copy → Check 动画反馈）
+- **重新生成按钮**（RefreshCcw 图标）：返回阶段 1
+
+**initialShare 机制:**
+- 如果传入 `initialShare`（从文件树的 `share` 字段获取），打开 popover 时直接显示已有链接，无需重新请求
+- 用户仍可点击"重新生成"创建新链接
+
+**边界处理:**
+- 切换 session 时自动重置状态
+- 点击 popover 外部自动关闭
+- 加载中显示 Loader2 动画
+
+#### 8. 集成到现有 toolbar
 
 在以下位置添加 Share 按钮（使用 `Share2` icon from lucide-react）:
 
-- **`FileFullscreenPreview.tsx`** — toolbar Actions 区域，Copy 和 Download 按钮旁边
-- **`SessionDrawer.tsx`** FilesTab toolbar — Copy 和 Download 按钮旁边
-- **`FilePreviewPanel.tsx`** — 在 breadcrumb bar 右侧添加 Share 按钮
+- **`FileFullscreenPreview.tsx`** — toolbar Actions 区域，Copy 和 Download 按钮旁边（`variant="icon"`）
+- **`SessionDrawer.tsx`** `FilesTab` toolbar — Copy 和 Download 按钮旁边（`variant="icon-sm"`）
+- **`FilePreviewPanel.tsx`** — breadcrumb bar 右侧（`variant="icon-sm"`）
 
-按钮仅在文件路径包含 `outputs_` 时显示（即只分享 artifact 输出文件）。
+按钮仅在文件路径包含 `outputs/` 时显示（即只分享 artifact 输出文件）。
 
-#### 7. i18n
+所有位置均传入 `initialShare` 以复用文件树中已有的分享信息。
 
-**`webui/src/locales/en/common.json`** + **`webui/src/locales/zh-CN/common.json`**:
-- `artifact.share`: "Share" / "分享"
-- `artifact.share.copyLink`: "Copy link" / "复制链接"
-- `artifact.share.copied`: "Link copied" / "链接已复制"
-- `artifact.share.expiresIn`: "Expires in" / "有效期"
-- `artifact.share.1d`: "1 day" / "1 天"
-- `artifact.share.7d`: "7 days" / "7 天"
-- `artifact.share.permanent`: "Permanent" / "永久"
+#### 9. ThreadShell 状态传递
 
-## Files to modify
+**`webui/src/components/thread/ThreadShell.tsx`**:
+- 新增 `fullscreenShare` 状态
+- `onOpenFileFullscreen` 回调签名变更为 `(path: string, share?: ArtifactShareResult | null) => void`
+- 将 share 信息传递给 `FileFullscreenPreview`
+
+#### 10. i18n
+
+**`webui/src/i18n/locales/en/common.json`** + **`webui/src/i18n/locales/zh-CN/common.json`**:
+
+```json
+{
+  "artifact": {
+    "share": "Share",
+    "shareTitle": "Share File",
+    "generateLink": "Generate Link",
+    "regenerate": "Regenerate",
+    "copyLink": "Copy Link",
+    "copied": "Link copied",
+    "expiresIn": "Expires",
+    "permanent": "Permanent",
+    "1d": "1 day",
+    "7d": "7 days",
+    "expiresAt": "Expires at {{date}}",
+    "expired": "Expired",
+    "urlLabel": "Share URL"
+  }
+}
+```
+
+中文对应：
+```json
+{
+  "artifact": {
+    "share": "分享",
+    "shareTitle": "分享文件",
+    "generateLink": "生成链接",
+    "regenerate": "重新生成",
+    "copyLink": "复制链接",
+    "copied": "链接已复制",
+    "expiresIn": "有效期",
+    "permanent": "永久",
+    "1d": "1 天",
+    "7d": "7 天",
+    "expiresAt": "有效期至 {{date}}",
+    "expired": "已失效",
+    "urlLabel": "分享链接"
+  }
+}
+```
+
+## Files
 
 ### Backend (Python)
 | File | Change |
 |------|--------|
-| `nanobot/config/gateway_secret.py` | **NEW** — 持久签名密钥加载/创建逻辑 |
-| `nanobot/webui/artifact_share.py` | **NEW** — 签名、验证、服务逻辑 |
-| `nanobot/webui/media_gateway.py` | 添加 `artifact_secret` 参数 + artifact share 方法 |
-| `nanobot/webui/gateway_services.py` | 调用 `load_or_create_gateway_secret()` 并传入 media gateway |
-| `nanobot/webui/ws_http.py` | 添加 2 个路由: share 生成 + artifact 服务 |
+| `nanobot/config/gateway_secret.py` | **NEW** — 持久签名密钥加载/创建逻辑（预留，当前未被 artifact share 使用） |
+| `nanobot/webui/artifact_share.py` | **NEW** — Token 生成、`.shares.json` 持久化、文件服务逻辑 |
+| `nanobot/webui/media_gateway.py` | 添加 `create_artifact_token()` / `serve_artifact_token()` 委托方法 |
+| `nanobot/webui/ws_http.py` | 添加 2 个路由: `/api/artifacts/share?t=` (fetch) + `/api/sessions/{key}/artifact-share` (create) |
+| `nanobot/webui/workspace_files.py` | `_build_tree()` 支持 `shares_map` 参数；新增 `_attach_share()` 在文件树中附加已有 share 信息 |
 
 ### Frontend (TypeScript/React)
 | File | Change |
 |------|--------|
-| `webui/src/lib/api.ts` | 添加 `createArtifactShare()` |
-| `webui/src/components/ArtifactShareButton.tsx` | **NEW** — Share 按钮组件 |
-| `webui/src/components/FileFullscreenPreview.tsx` | 添加 Share 按钮 |
-| `webui/src/components/thread/SessionDrawer.tsx` | 添加 Share 按钮 |
-| `webui/src/components/FilePreviewPanel.tsx` | 添加 Share 按钮（仅 outputs 文件） |
-| `webui/src/locales/en/common.json` | 添加 i18n keys |
-| `webui/src/locales/zh-CN/common.json` | 添加 i18n keys |
+| `webui/src/lib/api.ts` | 添加 `ArtifactShareResult` 接口 + `createArtifactShare()` |
+| `webui/src/lib/types.ts` | 添加 `ArtifactShareInfo` 接口；`WorkspaceFileNode` 新增 `share?` 字段 |
+| `webui/src/components/ArtifactShareButton.tsx` | **NEW** — Share 按钮 + Popover 组件（有效期选择、结果展示、复制、重新生成、过期检测） |
+| `webui/src/components/FileFullscreenPreview.tsx` | 添加 `initialShare` prop；toolbar 中集成 Share 按钮（仅 outputs 文件） |
+| `webui/src/components/thread/SessionDrawer.tsx` | `shareMap` 从 tree 提取 share 信息；FilesTab toolbar 集成 Share 按钮；`onOpenFileFullscreen` 传递 share |
+| `webui/src/components/FilePreviewPanel.tsx` | 添加 `initialShare` prop；breadcrumb bar 集成 Share 按钮（`variant="icon-sm"`） |
+| `webui/src/components/thread/ThreadShell.tsx` | 新增 `fullscreenShare` 状态；传递 share 到 `FileFullscreenPreview` |
+| `webui/src/i18n/locales/en/common.json` | 添加 `artifact.*` i18n keys（含 `expired`） |
+| `webui/src/i18n/locales/zh-CN/common.json` | 添加 `artifact.*` i18n keys（含 `expired`） |
 
 ### Tests
 | File | Change |
 |------|--------|
-| `tests/webui/test_artifact_share.py` | **NEW** — 签名/验证/过期/安全测试 |
+| `tests/webui/test_artifact_share.py` | **NEW** — Token 生成/验证/过期/安全测试 |
 
 ## Verification
 
 1. **Unit tests**: `pytest tests/webui/test_artifact_share.py -v`
-   - 签名生成和验证
+   - Token 生成和 URL 格式
    - 过期链接返回 410 Gone
-   - 永久链接不过期
+   - 永久链接（`expires_in=0`）不过期
    - 路径越界拒绝
-   - 签名篡改返回 401
+   - 文件不存在返回 404
    - HTML/SVG CSP headers 正确
+   - MIME 白名单与降级
    - 非法 expires_in 拒绝
+   - `X-Content-Type-Options: nosniff`
+   - `Content-Disposition: inline`
 
 2. **Integration test**: 启动 gateway，创建 share 链接，用 curl 直接访问（不带 token），验证文件内容返回
 
 3. **Frontend test**: `cd webui && bun run test`
-   - Share 按钮渲染
-   - Popover 交互
+   - Share 按钮渲染（仅在 outputs 路径时显示）
+   - Popover 交互：默认选中"永久"
+   - 生成链接后显示 URL 和有效期信息
+   - 复制按钮功能
+   - initialShare 直接展示已有链接
 
 4. **Manual E2E**:
    - 打开 WebUI → 在 session 的 outputs 目录中选择一个文件
-   - 点击 Share 按钮 → 选择有效期 → 复制链接
+   - 点击 Share 按钮 → 弹窗默认选中"永久"
+   - 点击"生成链接" → 显示 URL 和"永久有效"
+   - 点击复制按钮 → 复制成功（Check 动画）
    - 在新标签页中打开链接 → 文件正确渲染（inline）
-   - 等过期后访问 → 返回 410 Gone
-   - 选择"永久"→ 链接不过期，重启 gateway 后仍有效
-   - 手动删除 `~/.nanobot/data/gateway_secret` → 重启后链接失效（secret 重新生成）
+   - 切换有效期到"1 天"→ 重新生成 → 显示"有效期至 xxx"
+   - 刷新页面 → 文件树中仍显示已有 share 信息
+   - 等过期后访问 → 返回 410 Gone（同时前端显示"已失效"）
+   - 重启 gateway 后永久链接仍有效

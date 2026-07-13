@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Code2, Copy, Download, Eye, Loader2, Minimize2, CircleAlert, Check, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { ArtifactShareButton } from "@/components/ArtifactShareButton";
 import { Button } from "@/components/ui/button";
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
-import { ApiError, fetchFilePreview } from "@/lib/api";
+import { ApiError, fetchFilePreview, type ArtifactShareResult } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +14,7 @@ interface FileFullscreenPreviewProps {
   token: string;
   path: string;
   onClose: () => void;
+  initialShare?: ArtifactShareResult | null;
 }
 
 type PreviewState =
@@ -25,6 +27,7 @@ export function FileFullscreenPreview({
   token,
   path,
   onClose,
+  initialShare,
 }: FileFullscreenPreviewProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
@@ -135,6 +138,15 @@ export function FileFullscreenPreview({
         >
           <Download className="h-4 w-4" />
         </Button>
+        {path.includes("outputs/") && (
+          <ArtifactShareButton
+            key={path}
+            token={token}
+            sessionKey={sessionKey}
+            filePath={path}
+            initialShare={initialShare ?? null}
+          />
+        )}
         <Button
           variant="ghost"
           size="icon"

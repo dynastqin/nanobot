@@ -294,6 +294,8 @@
       "empty": "No MCP presets match this filter.",
       "openDocs": "Open docs",
       "test": "Test",
+      "retry": "Retry",
+      "retryHint": "Re-read config and reconnect this MCP server",
       "remove": "Remove",
       "removeTitle": "Remove MCP service",
       "removeDescription": "Remove {{name}}? This cannot be undone.",
@@ -1154,6 +1156,21 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "artifact": {
+    "share": "Share",
+    "shareTitle": "Share File",
+    "generateLink": "Generate Link",
+    "regenerate": "Regenerate",
+    "copyLink": "Copy Link",
+    "copied": "Link copied",
+    "expiresIn": "Expires",
+    "permanent": "Permanent",
+    "1d": "1 day",
+    "7d": "7 days",
+    "expiresAt": "Expires at {{date}}",
+    "expired": "Expired",
+    "urlLabel": "Share URL"
   },
   "plan": {
     "executing": "Executing",

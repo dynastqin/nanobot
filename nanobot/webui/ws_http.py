@@ -27,6 +27,10 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.webui.artifact_share import (
+    ALLOWED_EXPIRES_IN,
+    validate_expires_in,
+)
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
@@ -381,6 +385,10 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
             return self._handle_session_delete(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/artifact-share$", got)
+        if m:
+            return self._handle_artifact_share(request, m.group(1))
 
         return None
 
@@ -737,6 +745,12 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/media/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$", got)
         if m:
             return self._handle_media_fetch(m.group(1), m.group(2), request)
+        m = re.match(r"^/api/artifacts/share$", got)
+        if m:
+            token = _query_first(_parse_query(request.path), "t") or ""
+            if token:
+                return self._handle_artifact_fetch(token, request)
+            return _http_error(400, "missing token")
         return None
 
     def _handle_media_fetch(
@@ -747,6 +761,118 @@ class GatewayHTTPHandler:
             payload,
             request=request,
         )
+
+    def _handle_artifact_fetch(
+        self, token: str, request: WsRequest | None = None
+    ) -> Response:
+        # Artifact share URLs are session-agnostic (the URL only contains the
+        # token, no session key). Scan all outputs subdirs looking for a
+        # .shares.json that contains this token.
+        from pathlib import Path as _Path
+
+        outputs_root = _Path(self.media.workspace_path) / "outputs"
+        try:
+            for child in outputs_root.iterdir():
+                if not child.is_dir():
+                    continue
+                response = self.media.serve_artifact_token(
+                    token,
+                    outputs_dir=child,
+                    request=request,
+                )
+                if response.status_code != 404:
+                    return response
+        except OSError:
+            pass
+        return _http_error(404, "not found")
+
+    def _handle_artifact_share(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        if not raw_path or not raw_path.strip():
+            return _http_error(400, "missing path")
+
+        raw_expires_in = _query_first(query, "expires_in")
+        expires_in = 0
+        if raw_expires_in is not None:
+            try:
+                expires_in = int(raw_expires_in)
+            except (ValueError, TypeError):
+                return _http_error(400, "invalid expires_in")
+        if validate_expires_in(expires_in) is None:
+            return _http_error(
+                400,
+                f"expires_in must be one of: {', '.join(str(v) for v in ALLOWED_EXPIRES_IN)}",
+            )
+
+        # Resolve path
+        from pathlib import Path as _Path
+
+        from nanobot.security.workspace_policy import (
+            WorkspaceBoundaryError,
+            resolve_allowed_path,
+        )
+
+        cleaned = raw_path.strip()
+        if len(cleaned) > 4096:
+            return _http_error(400, "path is too long")
+
+        scope = self.workspaces.scope_for_session_key(decoded_key)
+        try:
+            resolved = resolve_allowed_path(
+                cleaned,
+                workspace=scope.project_path,
+                allowed_root=scope.project_path,
+                strict=True,
+            )
+        except FileNotFoundError:
+            return _http_error(404, "file not found")
+        except WorkspaceBoundaryError as e:
+            return _http_error(403, str(e))
+        except OSError:
+            return _http_error(400, "invalid path")
+
+        if not resolved.is_file():
+            return _http_error(404, "file not found")
+
+        # Verify path is under outputs/
+        try:
+            resolved.relative_to(scope.project_path / "outputs")
+        except ValueError:
+            return _http_error(403, "only files under outputs/ can be shared")
+
+        filename = resolved.name
+        expires_at = 0
+        if expires_in > 0:
+            expires_at = int(time.time() + expires_in)
+
+        from nanobot.utils.helpers import safe_filename as _safe_filename
+
+        session_outputs_dir = scope.project_path / "outputs" / _safe_filename(decoded_key)
+        url = self.media.create_artifact_token(
+            resolved,
+            outputs_dir=session_outputs_dir,
+            expires_at=expires_at,
+            expires_in=expires_in,
+            filename=filename,
+        )
+        if url is None:
+            return _http_error(400, "cannot sign path outside workspace")
+
+        return _http_json_response({
+            "url": url,
+            "expires_at": expires_at,
+            "expires_in": expires_in,
+            "filename": filename,
+        })
 
     # -- Misc routes --------------------------------------------------------
 

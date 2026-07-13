@@ -294,6 +294,8 @@
       "empty": "没有匹配的 MCP 预设。",
       "openDocs": "打开文档",
       "test": "测试",
+      "retry": "重试",
+      "retryHint": "重新读取配置并尝试重连此 MCP 服务",
       "remove": "移除",
       "removeTitle": "移除 MCP 服务",
       "removeDescription": "确定要移除 {{name}} 吗？此操作不可撤销。",
@@ -1154,6 +1156,21 @@
       "usePath": "使用路径",
       "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
     }
+  },
+  "artifact": {
+    "share": "分享",
+    "shareTitle": "分享文件",
+    "generateLink": "生成链接",
+    "regenerate": "重新生成",
+    "copyLink": "复制链接",
+    "copied": "链接已复制",
+    "expiresIn": "有效期",
+    "permanent": "永久",
+    "1d": "1 天",
+    "7d": "7 天",
+    "expiresAt": "有效期至 {{date}}",
+    "expired": "已失效",
+    "urlLabel": "分享链接"
   },
   "plan": {
     "executing": "正在执行",

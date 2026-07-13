@@ -11,6 +11,10 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.config.paths import get_media_dir
+from nanobot.webui.artifact_share import (
+    create_artifact_token,
+    serve_artifact_token,
+)
 from nanobot.webui.media_api import (
     attach_signed_media_urls,
     serve_signed_media,
@@ -90,3 +94,35 @@ class WebUIMediaGateway:
 
     def augment_transcript_user_media(self, paths: list[str]) -> list[dict[str, Any]]:
         return self.augment_transcript_media(paths)
+
+    def create_artifact_token(
+        self,
+        abs_path: Path,
+        *,
+        outputs_dir: Path,
+        expires_at: int = 0,
+        expires_in: int = 0,
+        filename: str = "",
+    ) -> str | None:
+        return create_artifact_token(
+            abs_path,
+            workspace_path=self.workspace_path,
+            outputs_dir=outputs_dir,
+            expires_at=expires_at,
+            expires_in=expires_in,
+            filename=filename,
+        )
+
+    def serve_artifact_token(
+        self,
+        token: str,
+        *,
+        outputs_dir: Path,
+        request: WsRequest | None = None,
+    ) -> Response:
+        return serve_artifact_token(
+            token,
+            workspace_path=self.workspace_path,
+            outputs_dir=outputs_dir,
+            request=request,
+        )

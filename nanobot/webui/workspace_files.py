@@ -33,6 +33,8 @@ def _build_tree(
     depth: int,
     counter: list[int],
     allowed_name: str | None = None,
+    shares_map: dict[str, dict[str, Any]] | None = None,
+    project_path: Path | None = None,
 ) -> dict[str, Any] | None:
     """Recursively build a file tree node. Returns None if this subtree is empty."""
     if depth > MAX_DEPTH or counter[0] >= MAX_ENTRIES:
@@ -60,7 +62,10 @@ def _build_tree(
                 }
 
                 if entry.is_dir():
-                    subtree = _build_tree(Path(entry.path), depth + 1, counter)
+                    subtree = _build_tree(
+                        Path(entry.path), depth + 1, counter,
+                        shares_map=shares_map, project_path=project_path,
+                    )
                     if subtree is not None and subtree.get("children"):
                         node["children"] = subtree["children"]
                     elif subtree is not None:
@@ -75,6 +80,7 @@ def _build_tree(
                         node["size"] = entry.stat().st_size
                     except OSError:
                         node["size"] = 0
+                    _attach_share(node, shares_map, project_path)
                     children.append(node)
     except PermissionError:
         return None
@@ -82,6 +88,24 @@ def _build_tree(
         return None
 
     return {"name": root.name or str(root), "type": "directory", "path": str(root), "children": children}
+
+
+def _attach_share(
+    node: dict[str, Any],
+    shares_map: dict[str, dict[str, Any]] | None,
+    project_path: Path | None,
+) -> None:
+    """Attach share info to *node* if a persisted share exists for this file."""
+    if not shares_map or not project_path:
+        return
+    try:
+        rel = Path(node["path"]).resolve().relative_to(project_path.resolve())
+        rel_str = rel.as_posix()
+    except (OSError, ValueError):
+        return
+    share = shares_map.get(rel_str)
+    if share:
+        node["share"] = share
 
 
 def list_workspace_files(
@@ -131,7 +155,24 @@ def list_workspace_files(
         raise WebUIWorkspaceFilesError(400, "path is not a directory")
 
     counter = [0]
-    tree = _build_tree(resolved, 0, counter, allowed_name=session_subdir)
+    shares_map: dict[str, dict[str, Any]] | None = None
+    if session_key:
+        from nanobot.utils.helpers import safe_filename as _safe_filename
+
+        try:
+            from nanobot.webui.artifact_share import load_artifact_shares
+
+            session_outputs_dir = (
+                scope.project_path / "outputs" / _safe_filename(session_key)
+            )
+            shares_map = load_artifact_shares(session_outputs_dir)
+        except (OSError, ImportError):
+            pass
+
+    tree = _build_tree(
+        resolved, 0, counter, allowed_name=session_subdir,
+        shares_map=shares_map, project_path=scope.project_path,
+    )
     if tree is None:
         return {
             "path": str(resolved),

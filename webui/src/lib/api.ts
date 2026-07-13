@@ -573,7 +573,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   token: string,
-  action: "enable" | "remove" | "test",
+  action: "enable" | "remove" | "test" | "retry",
   name: string,
   values: Record<string, string> = {},
   base: string = "",
@@ -901,6 +901,31 @@ export async function fetchChannelDetail(
 ): Promise<ChannelDetailResponse> {
   return request<ChannelDetailResponse>(
     `${base}/api/settings/channels/${encodeURIComponent(name)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export interface ArtifactShareResult {
+  url: string;
+  expires_at: number;
+  expires_in: number;
+  filename: string;
+}
+
+export async function createArtifactShare(
+  token: string,
+  sessionKey: string,
+  path: string,
+  expiresIn: number,
+  base: string = "",
+): Promise<ArtifactShareResult> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  query.set("expires_in", String(expiresIn));
+  return request<ArtifactShareResult>(
+    `${base}/api/sessions/${encodeURIComponent(sessionKey)}/artifact-share?${query}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

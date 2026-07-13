@@ -4,8 +4,9 @@ import { AlertCircle, ChevronRight, Code2, Eye, FileText, Loader2, Minimize2, X 
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
+import { ArtifactShareButton } from "@/components/ArtifactShareButton";
 import { splitFilePath } from "@/components/FileReferenceChip";
-import { ApiError, fetchFilePreview } from "@/lib/api";
+import { ApiError, fetchFilePreview, type ArtifactShareResult } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,7 @@ interface FilePreviewPanelProps {
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onClose: () => void;
   onRestore?: () => void;
+  initialShare?: ArtifactShareResult | null;
 }
 
 type PreviewState =
@@ -39,6 +41,7 @@ export function FilePreviewPanel({
   onResizeStart,
   onClose,
   onRestore,
+  initialShare,
 }: FilePreviewPanelProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
@@ -286,6 +289,16 @@ export function FilePreviewPanel({
                     <Eye className="h-3.5 w-3.5" />
                   )}
                 </button>
+              )}
+              {path.includes("outputs/") && (
+                <ArtifactShareButton
+                  key={path}
+                  token={token}
+                  sessionKey={sessionKey}
+                  filePath={path}
+                  variant="icon-sm"
+                  initialShare={initialShare ?? null}
+                />
               )}
             </div>
 

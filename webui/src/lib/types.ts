@@ -966,12 +966,20 @@ export interface FilePreviewPayload {
   truncated: boolean;
 }
 
+export interface ArtifactShareInfo {
+  url: string;
+  expires_at: number;
+  expires_in: number;
+  filename: string;
+}
+
 export interface WorkspaceFileNode {
   name: string;
   type: "file" | "directory";
   path: string;
   size?: number;
   children?: WorkspaceFileNode[];
+  share?: ArtifactShareInfo;
 }
 
 export interface WorkspaceFilesPayload {

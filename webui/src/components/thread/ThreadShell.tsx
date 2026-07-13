@@ -26,6 +26,7 @@ import {
   fetchMcpPresets,
   fetchSettings,
   listSlashCommands,
+  type ArtifactShareResult,
 } from "@/lib/api";
 import {
   CLI_APPS_CHANGED_EVENT,
@@ -346,6 +347,10 @@ export function ThreadShell({
     isPayload: isMcpPresetsPayload,
     selectItems: installedMcpPresetsFromPayload,
   });
+  const skillNames = useMemo(
+    () => skills.filter((s) => s.available).map((s) => s.name),
+    [skills],
+  );
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
@@ -354,6 +359,7 @@ export function ThreadShell({
   const [panelWidth, setPanelWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
   const [panelClosing, setPanelClosing] = useState(false);
   const [fullscreenFilePath, setFullscreenFilePath] = useState<string | null>(null);
+  const [fullscreenShare, setFullscreenShare] = useState<ArtifactShareResult | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
   const panelWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const panelCloseTimerRef = useRef<number | null>(null);
@@ -920,6 +926,7 @@ export function ThreadShell({
           showScrollToBottomButton={!!session}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          skillNames={skillNames}
           forkBoundaryMessageCount={forkBoundaryMessageCount}
           compaction={compaction}
           hasMoreBefore={hasMoreBefore}
@@ -942,7 +949,10 @@ export function ThreadShell({
           autoOpenFileSeq={rightPanel.autoOpenFileSeq}
           onResizeStart={handlePanelResizeStart}
           onClose={handleCloseRightPanel}
-          onOpenFileFullscreen={(path) => setFullscreenFilePath(path)}
+          onOpenFileFullscreen={(path, share) => {
+            setFullscreenFilePath(path);
+            setFullscreenShare(share ?? null);
+          }}
         />
       ) : rightPanel.kind === "link" && historyKey ? (
         <LinkPreviewDrawer
@@ -973,7 +983,11 @@ export function ThreadShell({
           sessionKey={historyKey}
           token={token}
           path={fullscreenFilePath}
-          onClose={() => setFullscreenFilePath(null)}
+          initialShare={fullscreenShare}
+          onClose={() => {
+            setFullscreenFilePath(null);
+            setFullscreenShare(null);
+          }}
         />
       ) : null}
     </section>

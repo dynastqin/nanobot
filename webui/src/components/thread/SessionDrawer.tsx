@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import {
   Code2,
@@ -18,10 +18,11 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { ArtifactShareButton } from "@/components/ArtifactShareButton";
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
 import { FileTreeNode } from "@/components/FileTree";
 import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
-import { ApiError, downloadFile, fetchFilePreview, fetchWorkspaceFiles } from "@/lib/api";
+import { ApiError, downloadFile, fetchFilePreview, fetchWorkspaceFiles, type ArtifactShareResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { FilePreviewPayload, WorkspaceFileNode } from "@/lib/types";
 import {
@@ -40,7 +41,7 @@ interface SessionDrawerProps {
   autoOpenFileSeq?: number;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onClose: () => void;
-  onOpenFileFullscreen: (path: string) => void;
+  onOpenFileFullscreen: (path: string, share?: ArtifactShareResult | null) => void;
 }
 
 export function SessionDrawer({
@@ -265,7 +266,7 @@ function FilesTab({
   token: string;
   autoOpenFile?: string;
   autoOpenFileSeq?: number;
-  onOpenFileFullscreen: (path: string) => void;
+  onOpenFileFullscreen: (path: string, share?: ArtifactShareResult | null) => void;
 }) {
   const { t } = useTranslation("common");
   const [tree, setTree] = useState<WorkspaceFileNode | null>(null);
@@ -300,6 +301,23 @@ function FilesTab({
       setLoading(false);
     }
   }, [token, sessionKey]);
+
+  // Build a path→share lookup from tree nodes
+  const shareMap = useMemo(() => {
+    const map: Record<string, ArtifactShareResult> = {};
+    function walk(node: WorkspaceFileNode) {
+      if (node.share) {
+        map[node.path] = node.share;
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          walk(child);
+        }
+      }
+    }
+    if (tree) walk(tree);
+    return map;
+  }, [tree]);
 
   // Keep ref in sync for resize handler
   useEffect(() => {
@@ -574,12 +592,22 @@ function FilesTab({
           >
             <Download className="h-3.5 w-3.5" />
           </Button>
+          {selectedPath && selectedPath.includes("outputs/") && (
+            <ArtifactShareButton
+              key={selectedPath}
+              token={token}
+              sessionKey={sessionKey}
+              filePath={selectedPath}
+              variant="icon-sm"
+              initialShare={shareMap[selectedPath] ?? null}
+            />
+          )}
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
             onClick={() => {
-              if (selectedPath) onOpenFileFullscreen(selectedPath);
+              if (selectedPath) onOpenFileFullscreen(selectedPath, shareMap[selectedPath] ?? null);
             }}
             disabled={!preview || previewLoading}
             aria-label={t("thread.sessionInfo.files.openFullscreen")}
