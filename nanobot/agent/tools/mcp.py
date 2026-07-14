@@ -1021,8 +1021,14 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         state._mcp_connecting = False
 
 
-async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
-    """Reconcile live MCP connections with the current config file."""
+async def reload_servers(
+    state: Any, registry: ToolRegistry, *, only_servers: set[str] | None = None
+) -> dict[str, Any]:
+    """Reconcile live MCP connections with the current config file.
+
+    When *only_servers* is provided, only those servers are reloaded; all
+    others are left untouched.
+    """
     async with _reload_lock(state):
         try:
             from nanobot.config.loader import load_config, resolve_config_env_vars
@@ -1049,6 +1055,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             if _server_signature(current_servers[name]) != _server_signature(next_servers[name])
         )
 
+        if only_servers is not None:
+            removed = [n for n in removed if n in only_servers]
+            added = [n for n in added if n in only_servers]
+            changed = [n for n in changed if n in only_servers]
+
         tools_removed = 0
         for name in [*removed, *changed]:
             tools_removed += _unregister_server_tools(state, registry, name)
@@ -1060,6 +1071,14 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             for name in next_names
             if name not in state._mcp_stacks and name not in set(added) | set(changed)
         )
+        if only_servers is not None:
+            retry_missing = [n for n in retry_missing if n in only_servers]
+            # Also include enabled servers in only_servers that aren't connected
+            for name in only_servers:
+                if name in next_servers and getattr(next_servers[name], "enabled", True):
+                    if name not in state._mcp_stacks and name not in retry_missing:
+                        retry_missing.append(name)
+            retry_missing = sorted(set(retry_missing))
         to_connect_names = sorted(
             name for name in set(added) | set(changed) | set(retry_missing)
             if getattr(next_servers[name], "enabled", True)
@@ -1109,20 +1128,28 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         }
 
 
-async def request_mcp_reload(bus: Any, *, timeout: float = 15.0) -> dict[str, Any]:
-    """Ask the running agent loop to reconcile live MCP connections."""
+async def request_mcp_reload(
+    bus: Any, *, timeout: float = 15.0, server_name: str | None = None,
+) -> dict[str, Any]:
+    """Ask the running agent loop to reconcile live MCP connections.
+
+    When *server_name* is provided, only that server is reloaded.
+    """
     loop = asyncio.get_running_loop()
     ack: asyncio.Future[dict[str, Any]] = loop.create_future()
+    metadata: dict[str, Any] = {
+        INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MCP_RELOAD,
+        RUNTIME_CONTROL_ACK: ack,
+    }
+    if server_name:
+        metadata["server_name"] = server_name
     await bus.publish_inbound(
         InboundMessage(
             channel="system",
             sender_id="webui-settings",
             chat_id="runtime",
             content=RUNTIME_CONTROL_MCP_RELOAD,
-            metadata={
-                INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MCP_RELOAD,
-                RUNTIME_CONTROL_ACK: ack,
-            },
+            metadata=metadata,
         )
     )
     try:
@@ -1147,8 +1174,10 @@ async def handle_runtime_control(state: Any, msg: InboundMessage, registry: Tool
         return False
 
     ack = metadata.get(RUNTIME_CONTROL_ACK)
+    server_name = metadata.get("server_name") if isinstance(metadata, dict) else None
+    only_servers = {server_name} if isinstance(server_name, str) and server_name else None
     try:
-        result = await reload_servers(state, registry)
+        result = await reload_servers(state, registry, only_servers=only_servers)
     except Exception as exc:
         logger.exception("MCP hot reload failed")
         result = {

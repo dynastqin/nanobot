@@ -5664,8 +5664,8 @@ function McpAppsCatalogRow({
   const [setupOpen, setSetupOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const enableBusy = actionKey === `enable:${preset.name}`;
-  const removeBusy = actionKey === `remove:${preset.name}`;
   const testBusy = actionKey === `test:${preset.name}`;
+  const removeBusy = actionKey === `remove:${preset.name}`;
   const toolsBusy = actionKey === `tools:${preset.name}`;
   const busy = enableBusy || removeBusy || testBusy || toolsBusy;
   const missingFields = preset.required_fields.filter((field) => field.required && !field.configured);
@@ -5980,18 +5980,13 @@ function McpDetailSheet({
   onOpenChange: (open: boolean) => void;
   showBrandLogos: boolean;
   onToggle: (name: string, enable: boolean) => void;
-  onAction: (action: "enable" | "remove" | "test" | "retry", name: string) => void;
+  onAction: (action: "test", name: string) => void;
   actionKey: string | null;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [toggling, setToggling] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
-  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
-
-  useEffect(() => {
-    setRemoveConfirmOpen(false);
-  }, [preset?.name]);
 
   if (!preset) return null;
 
@@ -6005,17 +6000,9 @@ function McpDetailSheet({
     ? tx("settings.mcp.sourceCustom", "Custom")
     : tx("settings.mcp.sourceBuiltin", "Built-in");
   const testBusy = actionKey === `test:${preset.name}`;
-  const removeBusy = actionKey === `remove:${preset.name}`;
-  const retryBusy = actionKey === `retry:${preset.name}`;
-  const busy = testBusy || removeBusy || toggling;  // retry is not "busy" so it doesn't block other actions
+  const busy = testBusy || toggling;
 
   const handleTest = () => onAction("test", preset.name);
-  const handleRetry = () => onAction("retry", preset.name);
-
-  const handleRemoveConfirm = () => {
-    onAction("remove", preset.name);
-    setRemoveConfirmOpen(false);
-  };
 
   const handleToggle = async () => {
     setToggling(true);
@@ -6074,23 +6061,6 @@ function McpDetailSheet({
                       disabled={toggling}
                     />
                   </span>
-                  {preset.installed ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => setRemoveConfirmOpen(true)}
-                      className="h-7 rounded-full px-3 text-[11px] font-medium text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      {removeBusy ? (
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
-                      ) : (
-                        <Trash2 className="mr-1 h-3 w-3" aria-hidden />
-                      )}
-                      {tx("settings.mcp.remove", "Remove")}
-                    </Button>
-                  ) : null}
                 </span>
               </div>
             </div>
@@ -6247,23 +6217,7 @@ function McpDetailSheet({
                 ) : (
                   <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                 )}
-                {tx("settings.mcp.test", "Test")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={testBusy || removeBusy || toggling}
-                onClick={handleRetry}
-                className="h-9 rounded-full px-4 text-[13px] font-medium"
-                title={tx("settings.mcp.retryHint", "Re-read config and reconnect this MCP server")}
-              >
-                {retryBusy ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : (
-                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                )}
-                {tx("settings.mcp.retry", "Retry")}
+                {tx("settings.mcp.test", "加载工具")}
               </Button>
             </div>
           ) : null}
@@ -6296,48 +6250,6 @@ function McpDetailSheet({
         </div>
       </SheetContent>
 
-      <Dialog open={removeConfirmOpen} onOpenChange={setRemoveConfirmOpen}>
-        <DialogContent className="max-w-[420px] rounded-[28px] border-border/55 bg-card/95 p-0 shadow-[0_28px_90px_rgba(15,23,42,0.20)] backdrop-blur-xl dark:border-white/10">
-          <div className="px-5 py-4">
-            <DialogHeader className="text-left">
-              <DialogTitle className="text-[18px] font-semibold tracking-[-0.01em]">
-                {tx("settings.mcp.removeTitle", "Remove MCP service")}
-              </DialogTitle>
-              <DialogDescription className="text-[12.5px] leading-5">
-                {t("settings.mcp.removeDescription", {
-                  name: preset.display_name,
-                  defaultValue: `Remove ${preset.display_name}? This cannot be undone.`,
-                })}
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-          <DialogFooter className="flex-row justify-end gap-2 border-t border-border/45 px-5 py-4">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={removeBusy}
-              onClick={() => setRemoveConfirmOpen(false)}
-              className="h-9 rounded-full px-4 text-[13px] font-medium"
-            >
-              {tx("actions.cancel", "Cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={removeBusy}
-              onClick={handleRemoveConfirm}
-              className="h-9 rounded-full px-4 text-[13px] font-medium"
-            >
-              {removeBusy ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : null}
-              {tx("settings.mcp.remove", "Remove")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Sheet>
   );
 }
@@ -6619,7 +6531,7 @@ function McpCustomServerPanel({
 function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string) => string): string {
   switch (status) {
     case "configured":
-      return tx("settings.mcp.statusConfigured", "Configured");
+      return tx("settings.mcp.statusAvailable", "Available");
     case "disabled":
       return tx("settings.mcp.statusDisabled", "Disabled");
     case "missing_credentials":
@@ -6629,7 +6541,7 @@ function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string
     case "coming_soon":
       return tx("settings.mcp.statusComingSoon", "Coming soon");
     default:
-      return tx("settings.mcp.statusNotInstalled", "Not enabled");
+      return tx("settings.mcp.statusUnavailable", "Unavailable");
   }
 }
 

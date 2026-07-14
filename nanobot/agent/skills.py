@@ -137,10 +137,10 @@ class SkillsLoader:
 
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
         """
-        Build a summary of all skills (name, description, path, availability).
+        Build a summary of all skills (name, description, availability).
 
         This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
+        skill content using read_skill when needed.
 
         Args:
             exclude: Set of skill names to omit from the summary.
@@ -161,11 +161,11 @@ class SkillsLoader:
             available = self._check_requirements(meta)
             desc = self._get_skill_description(skill_name)
             if available:
-                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
+                lines.append(f"- **{skill_name}** — {desc}")
             else:
                 missing = self._get_missing_requirements(meta)
                 suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
-                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
+                lines.append(f"- **{skill_name}** — {desc}{suffix}")
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:

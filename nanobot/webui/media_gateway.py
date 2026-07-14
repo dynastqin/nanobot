@@ -119,10 +119,12 @@ class WebUIMediaGateway:
         *,
         outputs_dir: Path,
         request: WsRequest | None = None,
+        view_source: bool = False,
     ) -> Response:
         return serve_artifact_token(
             token,
             workspace_path=self.workspace_path,
             outputs_dir=outputs_dir,
             request=request,
+            view_source=view_source,
         )

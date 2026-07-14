@@ -49,7 +49,7 @@ _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
 
-McpReload = Callable[[], Awaitable[dict[str, Any]]]
+McpReload = Callable[..., Awaitable[dict[str, Any]]]
 
 
 class McpPresetError(Exception):
@@ -1345,9 +1345,15 @@ async def mcp_presets_settings_action(
         payload = await asyncio.to_thread(custom_mcp_action, action, query)
     else:
         payload = await asyncio.to_thread(mcp_presets_action, action, query)
-    # Enable/disable/remove are config-only changes that take effect for new
-    # sessions. Hot-reloading them tears down live anyio cancel scopes inside
-    # the agent loop task and can crash the gateway.
-    if reload_mcp is not None and action not in {"enable", "remove"}:
-        payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
+    # Enable/disable are now hot-reloaded per-server so the toggle takes
+    # effect immediately. Remove still requires a restart.
+    if reload_mcp is not None:
+        if action == "enable":
+            server_name = (_query_first(query, "name") or "").strip()
+            if server_name:
+                payload = attach_mcp_hot_reload_result(
+                    payload, await reload_mcp(server_name=server_name)
+                )
+        elif action != "remove":
+            payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
     return payload

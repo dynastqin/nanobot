@@ -406,6 +406,16 @@ function SkillDetailSheet({
                       label={t("settings.skills.status", { defaultValue: "Status" })}
                       value={statusLabel}
                     />
+                    {activeSkill.path ? (
+                      <div className="col-span-2 rounded-[16px] bg-muted/35 px-3 py-2.5">
+                        <div className="text-[11px] text-muted-foreground">
+                          {t("settings.skills.path", { defaultValue: "Path" })}
+                        </div>
+                        <div className="mt-0.5 break-all text-[12px] font-mono text-foreground/80">
+                          {activeSkill.path}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   {!activeSkill.available && activeSkill.unavailable_reason && !(isWorkspace && isDisabled) ? (

@@ -55,6 +55,7 @@ def _skill_payload(loader: SkillsLoader, entry: dict[str, str]) -> dict[str, Any
     available, unavailable_reason = loader.get_skill_availability(name)
     return {
         "name": name,
+        "path": entry.get("path", ""),
         "description": _description(metadata, name),
         "source": entry.get("source", "unknown"),
         "available": available,

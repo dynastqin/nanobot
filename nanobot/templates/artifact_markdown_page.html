@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>$title</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    display:flex;flex-direction:column;
+    background:#fff;color:#1a1a2e;
+  }
+  @media (prefers-color-scheme:dark){
+    body{background:#0d0d1a;color:#e0e0e0}
+  }
+  .toolbar{
+    display:flex;align-items:center;justify-content:space-between;
+    height:48px;padding:0 12px;
+    border-bottom:1px solid rgba(0,0,0,.08);
+    background:inherit;flex-shrink:0;
+  }
+  @media (prefers-color-scheme:dark){
+    .toolbar{border-bottom-color:rgba(255,255,255,.08)}
+  }
+  .toolbar-left{display:flex;align-items:center;gap:8px;min-width:0}
+  .filename{
+    font-size:13px;font-weight:500;color:#374151;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  @media (prefers-color-scheme:dark){
+    .filename{color:#9ca3af}
+  }
+  .toolbar-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:32px;height:32px;border:none;border-radius:6px;
+    background:transparent;color:#6b7280;cursor:pointer;
+    transition:background .15s,color .15s;
+  }
+  .btn:hover{background:rgba(0,0,0,.06);color:#374151}
+  .btn.active{background:rgba(0,0,0,.08);color:#111827}
+  @media (prefers-color-scheme:dark){
+    .btn{color:#9ca3af}
+    .btn:hover{background:rgba(255,255,255,.08);color:#e0e0e0}
+    .btn.active{background:rgba(255,255,255,.1);color:#f9fafb}
+  }
+  .btn svg{width:16px;height:16px}
+  .content{flex:1;min-height:0;overflow:auto}
+  #source-view{display:none;padding:16px}
+  #source-view pre{
+    font-family:"SF Mono","Fira Code","Fira Mono",Menlo,Consolas,monospace;
+    font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
+    color:#1a1a2e;
+  }
+  @media (prefers-color-scheme:dark){
+    #source-view pre{color:#e0e0e0}
+  }
+  #preview-view{display:block;padding:16px 24px}
+  .markdown-body{font-size:15px;line-height:1.7;max-width:900px}
+  .markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4,.markdown-body h5,.markdown-body h6{
+    margin-top:24px;margin-bottom:12px;font-weight:600;line-height:1.35
+  }
+  .markdown-body h1{font-size:1.5em}
+  .markdown-body h2{font-size:1.3em}
+  .markdown-body h3{font-size:1.15em}
+  .markdown-body h4{font-size:1em}
+  .markdown-body p{margin-bottom:12px}
+  .markdown-body ul,.markdown-body ol{margin-bottom:12px;padding-left:24px}
+  .markdown-body li{margin-bottom:4px}
+  .markdown-body blockquote{
+    margin:12px 0;padding:8px 16px;
+    border-left:3px solid #d1d5db;color:#6b7280;
+  }
+  @media (prefers-color-scheme:dark){
+    .markdown-body blockquote{border-left-color:#4b5563;color:#9ca3af}
+  }
+  .markdown-body code{
+    font-family:"SF Mono","Fira Code","Fira Mono",Menlo,Consolas,monospace;
+    font-size:.88em;background:rgba(0,0,0,.05);padding:2px 6px;border-radius:4px;
+  }
+  @media (prefers-color-scheme:dark){
+    .markdown-body code{background:rgba(255,255,255,.08)}
+  }
+  .markdown-body pre{
+    margin:12px 0;padding:16px;border-radius:8px;
+    background:rgba(0,0,0,.03);overflow:auto;
+  }
+  @media (prefers-color-scheme:dark){
+    .markdown-body pre{background:rgba(255,255,255,.04)}
+  }
+  .markdown-body pre code{
+    background:none;padding:0;font-size:13px;line-height:1.6;
+  }
+  .markdown-body table{
+    border-collapse:collapse;margin:12px 0;width:100%;
+  }
+  .markdown-body th,.markdown-body td{
+    border:1px solid #d1d5db;padding:8px 12px;text-align:left;
+  }
+  @media (prefers-color-scheme:dark){
+    .markdown-body th,.markdown-body td{border-color:#374151}
+  }
+  .markdown-body th{background:rgba(0,0,0,.03);font-weight:600}
+  @media (prefers-color-scheme:dark){
+    .markdown-body th{background:rgba(255,255,255,.04)}
+  }
+  .markdown-body a{color:#3b82f6;text-decoration:none}
+  .markdown-body a:hover{text-decoration:underline}
+  .markdown-body img{max-width:100%;border-radius:6px}
+  .markdown-body hr{margin:24px 0;border:none;border-top:1px solid #d1d5db}
+  @media (prefers-color-scheme:dark){
+    .markdown-body hr{border-top-color:#374151}
+  }
+  body.source-mode #preview-view{display:none}
+  body.source-mode #source-view{display:block}
+  body.source-mode #btn-preview{background:transparent;color:#6b7280}
+  body.source-mode #btn-source{background:rgba(0,0,0,.08);color:#111827}
+  @media (prefers-color-scheme:dark){
+    body.source-mode #btn-source{background:rgba(255,255,255,.1);color:#f9fafb}
+    body.source-mode #btn-preview{color:#9ca3af}
+  }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <div class="toolbar-left">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#9ca3af;flex-shrink:0"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+    <span class="filename">$filename</span>
+  </div>
+  <div class="toolbar-actions">
+    <button class="btn active" id="btn-preview" title="Preview" onclick="setMode('preview')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+    <button class="btn" id="btn-source" title="Source" onclick="setMode('source')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+    </button>
+  </div>
+</div>
+<div class="content">
+  <div id="preview-view"><div class="markdown-body" id="markdown-render"></div></div>
+  <div id="source-view"><pre id="source-code"></pre></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  var CONTENT = $content_json;
+  var sourceEl = document.getElementById("source-code");
+  var renderEl = document.getElementById("markdown-render");
+  sourceEl.textContent = CONTENT;
+  renderEl.innerHTML = marked.parse(CONTENT);
+  function setMode(mode) {
+    document.body.className = mode === "source" ? "source-mode" : "";
+  }
+  if (window.location.search.indexOf("view=source") !== -1) setMode("source");
+</script>
+</body>
+</html>

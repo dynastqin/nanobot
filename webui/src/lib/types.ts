@@ -159,6 +159,7 @@ export interface SessionDeleteResult {
 
 export interface SkillSummary {
   name: string;
+  path: string;
   description: string;
   source: "workspace" | "builtin" | string;
   available: boolean;

@@ -81,10 +81,15 @@ class AgentProgressHook(AgentHook):
     @staticmethod
     def _extract_skill_load(tool_call: Any) -> dict[str, str] | None:
         name = getattr(tool_call, "name", "")
-        if name not in ("read_file", "read"):
-            return None
         arguments = getattr(tool_call, "arguments", {}) or {}
         if not isinstance(arguments, dict):
+            return None
+        if name == "read_skill":
+            skill_name = arguments.get("skill", "")
+            if isinstance(skill_name, str) and skill_name:
+                return {"name": skill_name}
+            return None
+        if name not in ("read_file", "read"):
             return None
         path = arguments.get("path", "")
         if not isinstance(path, str):

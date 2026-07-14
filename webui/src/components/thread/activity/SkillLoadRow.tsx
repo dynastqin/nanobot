@@ -22,10 +22,10 @@ export function SkillLoadRow({ name, active, phase = "start", toolEvent }: Skill
   const showDetails = done && toolEvent && hasToolCallDetails(toolEvent);
 
   const label = failed
-    ? t("message.skillLoadFailed", { defaultValue: "Failed to load skill" })
+    ? t("message.skillLoadFailed", { defaultValue: "Skill" })
     : running
-      ? t("message.skillLoadLoading", { defaultValue: "Loading skill" })
-      : t("message.skillLoadLoaded", { defaultValue: "Skill-load" });
+      ? t("message.skillLoadLoading", { defaultValue: "Skill" })
+      : t("message.skillLoadLoaded", { defaultValue: "Skill-loaded" });
 
   const detail = running || done || failed ? name : undefined;
 
@@ -41,7 +41,7 @@ export function SkillLoadRow({ name, active, phase = "start", toolEvent }: Skill
           ? "text-red-600 dark:text-red-400"
           : running
             ? "text-indigo-600 dark:text-indigo-400"
-            : "text-[rgb(251,146,60)]"
+            : "text-emerald-500/75"
       }
       icon={Zap}
       markerClassName={

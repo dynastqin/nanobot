@@ -354,7 +354,7 @@ class WebUISettingsRouter:
             payload = await mcp_presets_settings_action(
                 action,
                 self._parse_mcp_settings_query(request),
-                reload_mcp=lambda: request_mcp_reload(self.bus),
+                reload_mcp=lambda server_name=None: request_mcp_reload(self.bus, server_name=server_name),
             )
         except Exception as e:
             status = getattr(e, "status", 500)

@@ -821,7 +821,7 @@ function traceLabelColor(label: string): string {
   }
   switch (label) {
     case "Reading":
-      return "text-emerald-600 dark:text-emerald-400";
+      return "text-sky-600 dark:text-sky-400";
     case "Command":
       return "text-amber-600 dark:text-amber-400";
     case "Using":
@@ -855,13 +855,18 @@ function ActivityTraceRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const showDetails = toolEvent && hasToolCallDetails(toolEvent);
 
+  const pastTense: Record<string, string> = { Searching: "Searched", Reading: "Readed", Using: "Used" };
+  const displayLabel = !active && !trace.error ? (pastTense[trace.label] ?? trace.label) : trace.label;
+
   const labelNode = trace.provider
-    ? <>{trace.label}<span className="font-normal text-muted-foreground/55"> [{trace.provider}]</span></>
-    : trace.label;
+    ? <>{displayLabel}<span className="font-normal text-muted-foreground/55"> [{trace.provider}]</span></>
+    : displayLabel;
 
   const labelColor = trace.error
     ? "text-red-600 dark:text-red-400"
-    : traceLabelColor(trace.provider ? `Searching [${trace.provider}]` : trace.label);
+    : !active && (trace.label === "Command" || trace.label === "Reading" || trace.label === "Using" || trace.label === "Searching")
+      ? "text-emerald-500/75"
+      : traceLabelColor(trace.provider ? `Searching [${trace.provider}]` : trace.label);
 
   return (
     <ActivityStep

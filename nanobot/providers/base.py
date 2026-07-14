@@ -660,7 +660,11 @@ class LLMProvider(ABC):
         )
         logger.info("[LLM {} Request] messages={}", tag, messages)
         if tools:
-            logger.info("[LLM {} Request] tools={}", tag, tools)
+            tool_names = [
+                t["function"]["name"] if "function" in t else t.get("name", "?")
+                for t in tools
+            ]
+            logger.info("[LLM {} Request] tools=[{}]", tag, ", ".join(tool_names))
 
     def _log_llm_response(self, tag: str, model: str, response: LLMResponse, elapsed: float) -> None:
         """Log an LLM response at INFO level (summary) and DEBUG level (full content)."""

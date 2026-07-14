@@ -128,10 +128,10 @@ export type ActivityItemType = "reasoning" | "tool" | "cli" | "mcp" | "file_edit
 | 类型 | 运行中 | 完成 | 失败 | 图标 |
 |------|--------|------|------|------|
 | **reasoning** | 灰色文本 `text-muted-foreground/72` | 灰色文本 + 绿色标记 | — | `Brain`（灰 `text-muted-foreground/45`） |
-| **tool · Searching** | 紫色 `text-violet-600 dark:text-violet-400` | — | — | `Search` |
-| **tool · Reading** | 绿色 `text-emerald-600 dark:text-emerald-400` | — | — | `Wrench` 或 favicon |
-| **tool · Command** | 琥珀色 `text-amber-600 dark:text-amber-400` | — | — | `Wrench` |
-| **tool · Using** | 天蓝色 `text-sky-600 dark:text-sky-400` | — | — | `Wrench` 或 favicon |
+| **tool · Searching** | Searching（紫 `violet-600`） | Searched（`emerald-500/75`） | `text-red-600 dark:text-red-400` | `Search` |
+| **tool · Reading** | Reading（天蓝 `sky-600`） | Readed（`emerald-500/75`） | `text-red-600 dark:text-red-400` | `Wrench` 或 favicon |
+| **tool · Command** | 琥珀色 `text-amber-600 dark:text-amber-400` | `text-emerald-500/75` | `text-red-600 dark:text-red-400` | `Wrench` |
+| **tool · Using** | Using（天蓝 `sky-600`） | Used（`emerald-500/75`） | `text-red-600 dark:text-red-400` | `Wrench` 或 favicon |
 | **tool · Done** | — | 绿色 `text-emerald-500/75` | — | `CheckCircle2`（绿） |
 | **tool · 回退** | 灰色 `text-muted-foreground/85` | — | — | `Layers` |
 | **cli** | 天蓝 `text-sky-600/400` + 脉冲 | `text-emerald-500/75` | `text-red-600/400` | 品牌 logo 或 `>_`（回退色 `#0891B2`） |
@@ -148,10 +148,10 @@ export type ActivityItemType = "reasoning" | "tool" | "cli" | "mcp" | "file_edit
 
 | kind | label | 颜色 | 匹配规则 | 示例 |
 |---|---|---|---|---|
-| `search` | Searching | 紫 `violet-600` | 函数名含 `search` | `search("query")` |
-| `tool` | Reading | 绿 `emerald-600` | 函数名含 `fetch`/`read`/`open` 或 URL | `read("https://...")` |
-| `tool` | Command | 琥珀 `amber-600` | shell 命令 trace | `bash("ls -la")` |
-| `tool` | Using | 天蓝 `sky-600` | 其他带函数名的 trace | `tool_name("args")` |
+| `search` | Searching / Searched | 紫 `violet-600` / 绿 `emerald-500/75` / 红 `red-600` | 函数名含 `search` | `search("query")` |
+| `tool` | Reading / Readed | 天蓝 `sky-600` / 绿 `emerald-500/75` / 红 `red-600` | 函数名含 `fetch`/`read`/`open` 或 URL | `read("https://...")` |
+| `tool` | Command | 琥珀 `amber-600` / 绿 `emerald-500/75` / 红 `red-600` | shell 命令 trace | `bash("ls -la")` |
+| `tool` | Using / Used | 天蓝 `sky-600` / 绿 `emerald-500/75` / 红 `red-600` | 其他带函数名的 trace | `tool_name("args")` |
 | `done` | Done | 绿 `emerald-500/75` | 文本含 `done`/`complete`/`success` | `done` |
 | `trace` | Working | 灰 `muted-foreground/85` | 无法归类的内容 | 自由文本 |
 

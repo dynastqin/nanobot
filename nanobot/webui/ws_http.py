@@ -747,9 +747,11 @@ class GatewayHTTPHandler:
             return self._handle_media_fetch(m.group(1), m.group(2), request)
         m = re.match(r"^/api/artifacts/share$", got)
         if m:
-            token = _query_first(_parse_query(request.path), "t") or ""
+            q = _parse_query(request.path)
+            token = _query_first(q, "t") or ""
+            view_source = _query_first(q, "view") == "source"
             if token:
-                return self._handle_artifact_fetch(token, request)
+                return self._handle_artifact_fetch(token, request, view_source=view_source)
             return _http_error(400, "missing token")
         return None
 
@@ -763,7 +765,7 @@ class GatewayHTTPHandler:
         )
 
     def _handle_artifact_fetch(
-        self, token: str, request: WsRequest | None = None
+        self, token: str, request: WsRequest | None = None, *, view_source: bool = False
     ) -> Response:
         # Artifact share URLs are session-agnostic (the URL only contains the
         # token, no session key). Scan all outputs subdirs looking for a
@@ -779,6 +781,7 @@ class GatewayHTTPHandler:
                     token,
                     outputs_dir=child,
                     request=request,
+                    view_source=view_source,
                 )
                 if response.status_code != 404:
                     return response

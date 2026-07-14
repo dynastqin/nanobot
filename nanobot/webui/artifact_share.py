@@ -153,12 +153,16 @@ def serve_artifact_token(
     workspace_path: Path,
     outputs_dir: Path,
     request: WsRequest | None = None,
+    view_source: bool = False,
 ) -> Response:
     """Serve the file mapped by *token*.
 
     Returns the file content with appropriate Content-Type and security
     headers, or an error response if the token is unknown, expired, or
     points outside the workspace.
+
+    For markdown files, returns a self-contained HTML page with
+    source/preview toggle unless *view_source* is True.
     """
     if not _TOKEN_RE.fullmatch(token):
         return http_error(400, "invalid token")
@@ -230,6 +234,24 @@ def serve_artifact_token(
     elif mime == "text/html":
         common_headers.extend(_HTML_ARTIFACT_HEADERS)
 
+    # Serve markdown files as a rendered HTML page with source/preview toggle
+    if mime.startswith("text/markdown") and not view_source:
+        try:
+            md_content = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return http_error(500, "read error")
+        html_body = _render_markdown_artifact_page(
+            md_content, filename or candidate.name
+        )
+        return http_response(
+            html_body.encode("utf-8"),
+            content_type="text/html; charset=utf-8",
+            extra_headers=[
+                ("Cache-Control", "private, max-age=60"),
+                ("X-Content-Type-Options", "nosniff"),
+            ],
+        )
+
     try:
         size = candidate.stat().st_size
     except OSError:
@@ -271,6 +293,36 @@ def serve_artifact_token(
     except OSError:
         return http_error(500, "read error")
     return http_response(body, content_type=mime, extra_headers=common_headers)
+
+
+_ARTIFACT_MD_TEMPLATE: str | None = None
+
+
+def _get_artifact_md_template() -> str:
+    """Load the markdown artifact page template, cached after first read."""
+    global _ARTIFACT_MD_TEMPLATE
+    if _ARTIFACT_MD_TEMPLATE is None:
+        from pathlib import Path as _Path
+        template_path = _Path(__file__).resolve().parents[1] / "templates" / "artifact_markdown_page.html"
+        _ARTIFACT_MD_TEMPLATE = template_path.read_text(encoding="utf-8")
+    return _ARTIFACT_MD_TEMPLATE
+
+
+def _render_markdown_artifact_page(content: str, filename: str) -> str:
+    """Generate a self-contained HTML page that renders *content* as markdown.
+
+    The page includes a toolbar with source/preview toggle and uses marked.js
+    from CDN for rendering. Default view is the rendered preview.
+    """
+    import html as _html
+    from string import Template
+
+    tpl = Template(_get_artifact_md_template())
+    return tpl.substitute(
+        title=_html.escape(filename or "Shared Artifact"),
+        filename=_html.escape(filename or "artifact.md"),
+        content_json=json.dumps(content),
+    )
 
 
 def validate_expires_in(expires_in: int) -> int | None:
