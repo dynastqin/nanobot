@@ -201,6 +201,12 @@ export interface PlanStep {
   status: "pending" | "active" | "done" | "blocked";
 }
 
+export interface Folder {
+  id: string;
+  name: string;
+  order: number;
+}
+
 /** WebSocket snapshot for plan state (`plan_state` events; keyed by ``chat_id``). */
 export interface PlanStateWsPayload {
   title: string;
@@ -253,6 +259,7 @@ export interface ChatSummary {
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   workspaceScope?: WorkspaceScopePayload | null;
+  folderId?: string | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -302,6 +309,8 @@ export interface SidebarStatePayload {
   title_overrides: Record<string, string>;
   project_name_overrides: Record<string, string>;
   tags_by_key: Record<string, string[]>;
+  folders: Folder[];
+  session_folder: Record<string, string>;
   collapsed_groups: Record<string, boolean>;
   view: SidebarViewState;
   updated_at?: string | null;

@@ -112,6 +112,7 @@ export async function listSessions(
     preview?: string;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
+    folder_id?: string | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -128,6 +129,7 @@ export async function listSessions(
     preview: s.preview ?? "",
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
+    folderId: s.folder_id ?? null,
   }));
 }
 
@@ -677,6 +679,58 @@ export async function updateSidebarState(
   query.set("state", JSON.stringify(state));
   return request<SidebarStatePayload>(
     `${base}/api/webui/sidebar-state/update?${query}`,
+    token,
+  );
+}
+
+export async function createFolder(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<{ folders: Array<{ id: string; name: string; order: number }> }> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<{ folders: Array<{ id: string; name: string; order: number }> }>(
+    `${base}/api/webui/folders?${query}`,
+    token,
+  );
+}
+
+export async function renameFolder(
+  token: string,
+  folderId: string,
+  name: string,
+  base: string = "",
+): Promise<{ folders: Array<{ id: string; name: string; order: number }> }> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<{ folders: Array<{ id: string; name: string; order: number }> }>(
+    `${base}/api/webui/folders/${encodeURIComponent(folderId)}/rename?${query}`,
+    token,
+  );
+}
+
+export async function deleteFolder(
+  token: string,
+  folderId: string,
+  base: string = "",
+): Promise<{ folders: Array<{ id: string; name: string; order: number }> }> {
+  return request<{ folders: Array<{ id: string; name: string; order: number }> }>(
+    `${base}/api/webui/folders/${encodeURIComponent(folderId)}/delete`,
+    token,
+  );
+}
+
+export async function moveSession(
+  token: string,
+  sessionKey: string,
+  folderId: string | null,
+  base: string = "",
+): Promise<{ folders: Array<{ id: string; name: string; order: number }>; session_folder: Record<string, string> }> {
+  const query = new URLSearchParams();
+  if (folderId) query.set("folder_id", folderId);
+  return request<{ folders: Array<{ id: string; name: string; order: number }>; session_folder: Record<string, string> }>(
+    `${base}/api/webui/sessions/${encodeURIComponent(sessionKey)}/move-folder?${query}`,
     token,
   );
 }

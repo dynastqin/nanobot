@@ -1,5 +1,5 @@
 import { deriveTitle } from "@/lib/format";
-import type { ChatSummary, SidebarSortMode } from "@/lib/types";
+import type { ChatSummary, Folder, SidebarSortMode } from "@/lib/types";
 import { normalizeWorkspacePath, projectNameFromPath, sameWorkspacePath } from "@/lib/workspace";
 
 export const COLLAPSED_CHATS_VISIBLE_COUNT = 8;
@@ -8,10 +8,11 @@ export interface SessionGroup {
   id: string;
   label: string;
   sessions: ChatSummary[];
-  kind?: "project";
+  kind?: "project" | "folder";
   projectPath?: string;
   projectKey?: string;
   updatedAt?: string | null;
+  totalCount?: number;
 }
 
 export interface ChatGroupLabels {
@@ -33,6 +34,8 @@ export interface ChatGroupingOptions {
   showArchived: boolean;
   sort: SidebarSortMode;
   defaultWorkspacePath?: string | null;
+  folders: Folder[];
+  sessionFolder: Record<string, string>;
 }
 
 export function groupSessions(
@@ -44,75 +47,64 @@ export function groupSessions(
     return groupSessionsByProject(sessions, labels, options);
   }
 
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
-  const buckets = new Map<string, ChatSummary[]>();
   const pinned = new Set(options.pinnedKeys);
   const archived = new Set(options.archivedKeys);
+  const folders = options.folders ?? [];
+  const sessionFolder = options.sessionFolder ?? {};
 
-  const pinnedSessions: ChatSummary[] = [];
+  // Separate archived sessions
   const archivedSessions: ChatSummary[] = [];
-  const normalSessions: ChatSummary[] = [];
+  const activeSessions: ChatSummary[] = [];
 
   for (const session of sessions) {
     if (archived.has(session.key)) {
       if (options.showArchived) archivedSessions.push(session);
       continue;
     }
-    if (pinned.has(session.key)) {
-      pinnedSessions.push(session);
-      continue;
-    }
-    if (options.sort === "title_asc") {
-      normalSessions.push(session);
-      continue;
-    }
-    const timestamp = Date.parse(session.updatedAt ?? session.createdAt ?? "");
-    const label = Number.isFinite(timestamp) && timestamp >= startOfToday
-      ? labels.today
-      : Number.isFinite(timestamp) && timestamp >= startOfYesterday
-        ? labels.yesterday
-        : labels.earlier;
-    const bucket = buckets.get(label) ?? [];
-    bucket.push(session);
-    buckets.set(label, bucket);
+    activeSessions.push(session);
   }
 
-  const groups: SessionGroup[] = [labels.today, labels.yesterday, labels.earlier]
-    .map((label) => ({
-      id: `date:${label}`,
-      label,
-      sessions: sortSessions(
-        buckets.get(label) ?? [],
-        options.sort,
-        options.titleOverrides,
-      ),
-    }))
-    .filter((group) => group.sessions.length > 0);
+  // Build folder groups
+  const folderBuckets = new Map<string, ChatSummary[]>();
+  const chatsSessions: ChatSummary[] = [];
 
-  if (options.sort === "title_asc" && normalSessions.length) {
+  for (const session of activeSessions) {
+    const fid = sessionFolder[session.key];
+    if (fid && folders.some((f) => f.id === fid)) {
+      const bucket = folderBuckets.get(fid) ?? [];
+      bucket.push(session);
+      folderBuckets.set(fid, bucket);
+    } else {
+      chatsSessions.push(session);
+    }
+  }
+
+  const groups: SessionGroup[] = [];
+
+  // Add custom folder groups (sorted by folder order), above Chats
+  for (const folder of folders) {
+    const bucket = folderBuckets.get(folder.id) ?? [];
+    const sorted = sortFolderSessions(bucket, options.sort, options.titleOverrides, pinned);
     groups.push({
-      id: "date:all",
-      label: labels.all,
-      sessions: sortSessions(
-        normalSessions,
-        options.sort,
-        options.titleOverrides,
-      ),
+      id: `folder:${folder.id}`,
+      label: folder.name,
+      kind: "folder" as const,
+      sessions: sorted,
+      totalCount: bucket.length,
     });
   }
-  if (pinnedSessions.length) {
-    groups.unshift({
-      id: "pinned",
-      label: labels.pinned,
-      sessions: sortSessions(
-        pinnedSessions,
-        options.sort,
-        options.titleOverrides,
-      ),
-    });
-  }
+
+  // Add Chats group (always present)
+  const sortedChats = sortFolderSessions(chatsSessions, options.sort, options.titleOverrides, pinned);
+  groups.push({
+    id: "folder:chats",
+    label: "Chats",
+    kind: "folder" as const,
+    sessions: sortedChats,
+    totalCount: chatsSessions.length,
+  });
+
+  // Add archived group if needed
   if (archivedSessions.length) {
     groups.push({
       id: "archived",
@@ -124,6 +116,7 @@ export function groupSessions(
       ),
     });
   }
+
   return groups;
 }
 
@@ -149,7 +142,7 @@ export function limitGroups(
     if (activeKey && visible.some((session) => session.key === activeKey)) {
       activeVisible = true;
     }
-    if (visible.length > 0) {
+    if (visible.length > 0 || group.kind === "folder") {
       out.push({ ...group, sessions: visible });
     }
   }
@@ -176,11 +169,11 @@ export function isCollapsedProject(
   group: SessionGroup,
   collapsedGroups: Record<string, boolean>,
 ): boolean {
-  return group.kind === "project" && Boolean(collapsedGroups[group.id]);
+  return (group.kind === "project" || group.kind === "folder") && Boolean(collapsedGroups[group.id]);
 }
 
 export function isFoldableChatsGroup(group: SessionGroup): boolean {
-  return group.id === "workspace:chats" || group.id === "date:all";
+  return group.id === "date:all";
 }
 
 export function isFoldedChatsGroup(
@@ -289,21 +282,80 @@ function groupSessionsByProject(
       },
       null,
     );
-    groups.push({
-      id: "workspace:chats",
-      label: labels.all,
-      updatedAt: chatsUpdatedAt,
-      sessions: sortProjectSessions(
-        conversations,
-        options.sort,
-        options.titleOverrides,
-        pinned,
-        archived,
-      ),
-    });
+
+    const folders = options.folders ?? [];
+    const sessionFolder = options.sessionFolder ?? {};
+
+    if (folders.length) {
+      // Apply folder grouping to default-workspace conversations
+      const folderBuckets = new Map<string, ChatSummary[]>();
+      const chatsSessions: ChatSummary[] = [];
+
+      for (const session of conversations) {
+        const fid = sessionFolder[session.key];
+        if (fid && folders.some((f) => f.id === fid)) {
+          const bucket = folderBuckets.get(fid) ?? [];
+          bucket.push(session);
+          folderBuckets.set(fid, bucket);
+        } else {
+          chatsSessions.push(session);
+        }
+      }
+
+      for (const folder of folders) {
+        const bucket = folderBuckets.get(folder.id) ?? [];
+        groups.push({
+          id: `folder:${folder.id}`,
+          label: folder.name,
+          kind: "folder" as const,
+          sessions: sortFolderSessions(
+            bucket,
+            options.sort,
+            options.titleOverrides,
+            pinned,
+          ),
+          totalCount: bucket.length,
+        });
+      }
+
+      groups.push({
+        id: "workspace:chats",
+        label: labels.all,
+        updatedAt: chatsUpdatedAt,
+        kind: "folder" as const,
+        sessions: sortProjectSessions(
+          chatsSessions,
+          options.sort,
+          options.titleOverrides,
+          pinned,
+          archived,
+        ),
+        totalCount: chatsSessions.length,
+      });
+    } else {
+      groups.push({
+        id: "workspace:chats",
+        label: labels.all,
+        kind: "folder" as const,
+        updatedAt: chatsUpdatedAt,
+        sessions: sortProjectSessions(
+          conversations,
+          options.sort,
+          options.titleOverrides,
+          pinned,
+          archived,
+        ),
+        totalCount: conversations.length,
+      });
+    }
   }
 
+  // Only sort project groups by updatedAt; folders and chats stay on top
   groups.sort((a, b) => {
+    const aIsProject = a.kind === "project";
+    const bIsProject = b.kind === "project";
+    if (aIsProject !== bIsProject) return aIsProject ? 1 : -1;
+    if (!aIsProject) return 0;
     const timeOrder = dateToTime(b.updatedAt) - dateToTime(a.updatedAt);
     if (timeOrder !== 0) return timeOrder;
     return a.label.localeCompare(b.label, "en", {
@@ -328,6 +380,18 @@ function sortProjectSessions(
     const archiveOrder = Number(archived.has(a.key)) - Number(archived.has(b.key));
     if (archiveOrder !== 0) return archiveOrder;
     return 0;
+  });
+}
+
+function sortFolderSessions(
+  sessions: ChatSummary[],
+  sort: SidebarSortMode,
+  titleOverrides: Record<string, string>,
+  pinned: Set<string>,
+): ChatSummary[] {
+  return sortSessions(sessions, sort, titleOverrides).sort((a, b) => {
+    const pinOrder = Number(pinned.has(b.key)) - Number(pinned.has(a.key));
+    return pinOrder;
   });
 }
 

@@ -26,6 +26,9 @@ _MAX_TITLE_LEN = 160
 _MAX_TAG_LEN = 40
 _ALLOWED_DENSITIES = {"comfortable", "compact"}
 _ALLOWED_SORTS = {"updated_desc", "created_desc", "title_asc"}
+_MAX_FOLDER_NAME_LEN = 40
+_MAX_FOLDERS = 50
+_MAX_FOLDER_ID_LEN = 36
 
 
 def webui_sidebar_state_path() -> Path:
@@ -40,6 +43,8 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "title_overrides": {},
         "project_name_overrides": {},
         "tags_by_key": {},
+        "folders": [],
+        "session_folder": {},
         "collapsed_groups": {},
         "view": {
             "density": "comfortable",
@@ -114,6 +119,42 @@ def _clean_tags_by_key(value: Any) -> dict[str, list[str]]:
     return out
 
 
+def _clean_folders(value: Any) -> list[dict[str, Any]]:
+    """Return a validated/normalized folder list."""
+    if not isinstance(value, list):
+        return []
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for item in value[:_MAX_FOLDERS]:
+        if not isinstance(item, dict):
+            continue
+        fid = _clean_string(item.get("id"), max_len=_MAX_FOLDER_ID_LEN)
+        name = _clean_string(item.get("name"), max_len=_MAX_FOLDER_NAME_LEN)
+        if fid is None or name is None:
+            continue
+        if fid in seen_ids or name.lower() in seen_names:
+            continue
+        seen_ids.add(fid)
+        seen_names.add(name.lower())
+        out.append({"id": fid, "name": name, "order": len(out)})
+    return out
+
+
+def _clean_session_folder(value: Any) -> dict[str, str]:
+    """Return a validated session_key -> folder_id mapping."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, raw_fid in list(value.items())[:_MAX_MAP_ITEMS]:
+        cleaned_key = _clean_string(key)
+        cleaned_fid = _clean_string(raw_fid, max_len=_MAX_FOLDER_ID_LEN)
+        if cleaned_key is None or cleaned_fid is None:
+            continue
+        out[cleaned_key] = cleaned_fid
+    return out
+
+
 def _clean_view(value: Any) -> dict[str, Any]:
     default = default_webui_sidebar_state()["view"]
     if not isinstance(value, dict):
@@ -141,6 +182,8 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
         raw.get("project_name_overrides")
     )
     state["tags_by_key"] = _clean_tags_by_key(raw.get("tags_by_key"))
+    state["folders"] = _clean_folders(raw.get("folders"))
+    state["session_folder"] = _clean_session_folder(raw.get("session_folder"))
     state["collapsed_groups"] = _clean_bool_map(raw.get("collapsed_groups"))
     state["view"] = _clean_view(raw.get("view"))
     updated_at = raw.get("updated_at")
@@ -194,3 +237,52 @@ def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     finally:
         os.close(dir_fd)
     return state
+
+
+def create_folder(name: str) -> dict[str, Any]:
+    """Create a folder and return the updated sidebar state."""
+    state = read_webui_sidebar_state()
+    if len(state["folders"]) >= _MAX_FOLDERS:
+        raise ValueError("too many folders")
+    fid = _new_folder_id()
+    state["folders"].append({"id": fid, "name": name, "order": len(state["folders"])})
+    return write_webui_sidebar_state(state)
+
+
+def rename_folder(folder_id: str, name: str) -> dict[str, Any]:
+    """Rename a folder and return the updated sidebar state."""
+    state = read_webui_sidebar_state()
+    for f in state["folders"]:
+        if f["id"] == folder_id:
+            f["name"] = name
+            return write_webui_sidebar_state(state)
+    raise ValueError("folder not found")
+
+
+def delete_folder(folder_id: str) -> dict[str, Any]:
+    """Delete a folder, moving its sessions back to Chats, and return updated state."""
+    state = read_webui_sidebar_state()
+    state["folders"] = [f for f in state["folders"] if f["id"] != folder_id]
+    for i, f in enumerate(state["folders"]):
+        f["order"] = i
+    state["session_folder"] = {
+        k: v for k, v in state["session_folder"].items() if v != folder_id
+    }
+    return write_webui_sidebar_state(state)
+
+
+def move_session_to_folder(session_key: str, folder_id: str | None) -> dict[str, Any]:
+    """Move a session to a folder (or Chats if folder_id is None)."""
+    state = read_webui_sidebar_state()
+    if folder_id is not None:
+        if not any(f["id"] == folder_id for f in state["folders"]):
+            raise ValueError("folder not found")
+        state["session_folder"][session_key] = folder_id
+    else:
+        state["session_folder"].pop(session_key, None)
+    return write_webui_sidebar_state(state)
+
+
+def _new_folder_id() -> str:
+    import uuid
+    return uuid.uuid4().hex[:12]

@@ -247,7 +247,7 @@ describe("ChatList", () => {
     expect(updated[0].firstElementChild).toHaveClass("h-2", "w-2");
   });
 
-  it("folds long default workspace chats and can show all", () => {
+  it("collapses default workspace chats when folder header is clicked", () => {
     const sessions = Array.from({ length: 10 }, (_, index) =>
       session({
         chatId: `chat-${index}`,
@@ -276,23 +276,23 @@ describe("ChatList", () => {
     const { rerender } = render(<ChatList {...baseProps} />);
     const chatsSection = screen.getByRole("region", { name: "Chats" });
 
+    // All chats visible by default
+    expect(within(chatsSection).getByText("Chat 0")).toBeInTheDocument();
     expect(within(chatsSection).getByText("Chat 9")).toBeInTheDocument();
-    expect(within(chatsSection).getByText("Chat 2")).toBeInTheDocument();
-    expect(within(chatsSection).queryByText("Chat 1")).not.toBeInTheDocument();
-    expect(within(chatsSection).queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
-    fireEvent.click(within(chatsSection).getByRole("button", { name: "2 hidden chats" }));
 
+    // Click folder header to collapse
+    fireEvent.click(within(chatsSection).getByRole("button", { expanded: true }));
     expect(onToggleGroup).toHaveBeenCalledWith("workspace:chats");
 
     rerender(
       <ChatList
         {...baseProps}
-        collapsedGroups={{ "workspace:chats": false }}
+        collapsedGroups={{ "workspace:chats": true }}
       />,
     );
 
-    expect(within(chatsSection).getByText("Chat 0")).toBeInTheDocument();
-    expect(within(chatsSection).getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    // Chats hidden when collapsed
+    expect(within(chatsSection).queryByText("Chat 0")).not.toBeInTheDocument();
   });
 
   it("sorts Chats section among project groups by recency, not always last", () => {
@@ -397,7 +397,7 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "Chats", "project-b"]);
+    expect(regionNames).toEqual(["Chats", "project-a", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 
@@ -447,7 +447,7 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "project-b", "Chats"]);
+    expect(regionNames).toEqual(["Chats", "project-a", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 });

@@ -17,6 +17,7 @@ interface ThreadMessagesProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   skillNames?: string[];
+  slashCommandNames?: string[];
   forkBoundaryMessageCount?: number | null;
   compaction?: CompactionInfo | null;
   onOpenFilePreview?: (path: string) => void;
@@ -168,6 +169,7 @@ export function ThreadMessages({
   cliApps = [],
   mcpPresets = [],
   skillNames = [],
+  slashCommandNames = [],
   forkBoundaryMessageCount = null,
   compaction = null,
   onOpenFilePreview,
@@ -248,6 +250,7 @@ export function ThreadMessages({
                     cliApps={cliApps}
                     mcpPresets={mcpPresets}
                     skillNames={skillNames}
+                    slashCommandNames={slashCommandNames}
                     onOpenFilePreview={onOpenFilePreview}
                     onOpenLink={onOpenLink}
                     onForkFromHere={

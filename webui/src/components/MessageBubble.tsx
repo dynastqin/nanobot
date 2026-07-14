@@ -48,6 +48,7 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   skillNames?: string[];
+  slashCommandNames?: string[];
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   onForkFromHere?: () => void;
@@ -88,6 +89,7 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   skillNames = [],
+  slashCommandNames = [],
   onOpenFilePreview,
   onOpenLink,
   onForkFromHere,
@@ -160,6 +162,7 @@ export function MessageBubble({
               cliApps={mentionCliApps}
               mcpPresets={mentionMcpPresets}
               skillNames={skillNames}
+              slashCommandNames={slashCommandNames}
             />
           </p>
         ) : null}

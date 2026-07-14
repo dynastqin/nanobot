@@ -43,7 +43,7 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { fetchSettings, fetchWorkspaces, createFolder, renameFolder, deleteFolder, moveSession } from "@/lib/api";
 import {
   createRuntimeHost,
   getHostApi,
@@ -1045,7 +1045,7 @@ function Shell({
     (groupId: string) => {
       void updateSidebarState((current) => {
         const collapsedGroups = { ...current.collapsed_groups };
-        if (groupId === "workspace:chats" || groupId === "date:all") {
+        if (groupId === "date:all") {
           if (collapsedGroups[groupId] === false) {
             delete collapsedGroups[groupId];
           } else {
@@ -1135,6 +1135,104 @@ function Shell({
     }));
   }, [updateSidebarState]);
 
+  const handleCreateFolder = useCallback(async (name: string): Promise<string | null> => {
+    try {
+      const result = await createFolder(token, name);
+      await updateSidebarState((prev) => ({
+        ...prev,
+        folders: result.folders,
+      }));
+      const trimmed = name.trim();
+      const newFolder = result.folders.find((f) => f.name === trimmed);
+      return newFolder?.id ?? null;
+    } catch (e) {
+      console.error("createFolder failed", e);
+      return null;
+    }
+  }, [token, updateSidebarState]);
+
+  const handleRenameFolder = useCallback(async (folderId: string, newName: string) => {
+    try {
+      const result = await renameFolder(token, folderId, newName.trim());
+      await updateSidebarState((prev) => ({
+        ...prev,
+        folders: result.folders,
+      }));
+    } catch (e) {
+      console.error("renameFolder failed", e);
+    }
+  }, [token, updateSidebarState]);
+
+  const handleDeleteFolder = useCallback(async (folderId: string) => {
+    try {
+      const result = await deleteFolder(token, folderId);
+      const sessionFolder = { ...sidebarState.session_folder };
+      for (const [key, fid] of Object.entries(sessionFolder)) {
+        if (fid === folderId) delete sessionFolder[key];
+      }
+      await updateSidebarState((prev) => ({
+        ...prev,
+        folders: result.folders,
+        session_folder: sessionFolder,
+      }));
+    } catch (e) {
+      console.error("deleteFolder failed", e);
+    }
+  }, [token, sidebarState, updateSidebarState]);
+
+  const handleMoveToFolder = useCallback(async (sessionKey: string, folderId: string | null) => {
+    try {
+      const result = await moveSession(token, sessionKey, folderId);
+      await updateSidebarState((prev) => ({
+        ...prev,
+        folders: result.folders,
+        session_folder: result.session_folder,
+      }));
+    } catch (e) {
+      console.error("moveSession failed", e);
+    }
+  }, [token, updateSidebarState]);
+
+  const handleRenameSession = useCallback((key: string, newName: string) => {
+    void updateSidebarState((current) => {
+      const titleOverrides = { ...current.title_overrides };
+      const cleaned = newName.trim();
+      if (cleaned) {
+        titleOverrides[key] = cleaned;
+      } else {
+        delete titleOverrides[key];
+      }
+      return {
+        ...current,
+        title_overrides: titleOverrides,
+      };
+    });
+  }, [updateSidebarState]);
+
+  const handleDeleteSession = useCallback(async (key: string) => {
+    try {
+      const result = await deleteChat(key);
+      if (result.blocked_by_automations) {
+        const automations = result.automations ?? [];
+        const label = sidebarState.title_overrides[key] ||
+          sessions.find((s) => s.key === key)?.title || "";
+        setPendingDelete({ key, label, automations });
+        return;
+      }
+      const deletingActive = activeKey === key;
+      if (deletingActive) {
+        const currentIndex = sessions.findIndex((s) => s.key === key);
+        const fallbackKey = sessions[currentIndex + 1]?.key ?? sessions[currentIndex - 1]?.key ?? null;
+        navigate({
+          view: "chat",
+          activeKey: fallbackKey,
+          settingsSection: "overview",
+        }, { replace: true });
+      }
+    } catch (e) {
+      console.error("Failed to delete session", e);
+    }
+  }, [deleteChat, activeKey, navigate, sessions, sidebarState.title_overrides]);
   const onOpenSessionSearch = useCallback(() => {
     setMobileSidebarOpen(false);
     setSessionSearchOpen(true);
@@ -1417,6 +1515,14 @@ function Shell({
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
     botName: settingsSnapshot?.agent.bot_name,
     botIcon: settingsSnapshot?.agent.bot_icon,
+    onCreateFolder: handleCreateFolder,
+    onRenameFolder: handleRenameFolder,
+    onDeleteFolder: handleDeleteFolder,
+    onMoveToFolder: handleMoveToFolder,
+    folders: sidebarState.folders,
+    sessionFolder: sidebarState.session_folder,
+    onRename: handleRenameSession,
+    onDelete: handleDeleteSession,
   };
   const hostSidebarCollapsed = showHostChrome && !hostSidebarOpen;
   const showHostSidebarPreview =
@@ -1553,6 +1659,8 @@ function Shell({
             activeKey={activeKey}
             loading={loading}
             titleOverrides={sidebarState.title_overrides}
+            sessionFolder={sidebarState.session_folder}
+            folders={sidebarState.folders}
             onSelect={onSelectSearchResult}
           />
         <main

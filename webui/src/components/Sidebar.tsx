@@ -59,6 +59,14 @@ interface SidebarProps {
   hostChromeInset?: boolean;
   botName?: string;
   botIcon?: string;
+  onCreateFolder?: (name: string) => Promise<string | null>;
+  onRenameFolder?: (folderId: string, newName: string) => void;
+  onDeleteFolder?: (folderId: string) => void;
+  onMoveToFolder?: (sessionKey: string, folderId: string | null) => void;
+  folders?: Array<{ id: string; name: string; order: number }>;
+  sessionFolder?: Record<string, string>;
+  onRename?: (key: string, newName: string) => void;
+  onDelete?: (key: string) => void;
 }
 
 type NavigatorWithUserAgentData = Navigator & {
@@ -231,6 +239,14 @@ export function Sidebar(props: SidebarProps) {
             actionMenuPortalContainer={
               props.containActionMenus ? menuPortalContainer : undefined
             }
+            folders={props.folders}
+            sessionFolder={props.sessionFolder}
+            onRenameFolder={props.onRenameFolder}
+            onDeleteFolder={props.onDeleteFolder}
+            onMoveToFolder={props.onMoveToFolder}
+            onCreateFolder={props.onCreateFolder}
+            onRename={props.onRename}
+            onDelete={props.onDelete}
           />
         )}
       </div>

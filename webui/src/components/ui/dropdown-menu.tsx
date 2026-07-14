@@ -41,16 +41,20 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 
 const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubContent
-    ref={ref}
-    className={cn(
-      menuContentClassName,
-      className,
-    )}
-    {...props}
-  />
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent> & {
+    portalContainer?: HTMLElement | null;
+  }
+>(({ className, portalContainer, ...props }, ref) => (
+  <DropdownMenuPrimitive.Portal container={portalContainer ?? undefined}>
+    <DropdownMenuPrimitive.SubContent
+      ref={ref}
+      className={cn(
+        menuContentClassName,
+        className,
+      )}
+      {...props}
+    />
+  </DropdownMenuPrimitive.Portal>
 ));
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
 

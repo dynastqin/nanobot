@@ -78,7 +78,11 @@ from nanobot.webui.session_automations import (
 )
 from nanobot.webui.session_list_index import list_webui_sessions
 from nanobot.webui.sidebar_state import (
+    create_folder,
+    delete_folder,
+    move_session_to_folder,
     read_webui_sidebar_state,
+    rename_folder,
     write_webui_sidebar_state,
 )
 from nanobot.webui.skills_api import (
@@ -110,6 +114,12 @@ def _decode_api_key(raw_key: str) -> str | None:
     if _api_key_re.match(key) is None:
         return None
     return key
+
+
+def _clean_folder_name(raw: Any) -> str:
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()[:40]
 
 
 def _default_model_name_from_config() -> str | None:
@@ -405,6 +415,9 @@ class GatewayHTTPHandler:
         sessions = list_webui_sessions(self.session_manager)
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
+        sidebar_state = read_webui_sidebar_state()
+        session_folder = sidebar_state.get("session_folder", {})
+
         cleaned = []
         for s in sessions:
             key = s.get("key")
@@ -417,6 +430,7 @@ class GatewayHTTPHandler:
                 row["run_started_at"] = started_at
             scope = self.workspaces.scope_for_session_key(key)
             row["workspace_scope"] = scope.payload()
+            row["folder_id"] = session_folder.get(key)
             cleaned.append(row)
         return {"sessions": cleaned}
 
@@ -538,8 +552,7 @@ class GatewayHTTPHandler:
             return _http_error(400, "missing path")
         if len(cleaned) > 4096:
             return _http_error(400, "path is too long")
-        from pathlib import Path as _Path
-        from nanobot.security.workspace_policy import resolve_allowed_path, WorkspaceBoundaryError
+        from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
         scope = self.workspaces.scope_for_session_key(decoded_key)
         try:
             resolved = resolve_allowed_path(
@@ -817,7 +830,6 @@ class GatewayHTTPHandler:
             )
 
         # Resolve path
-        from pathlib import Path as _Path
 
         from nanobot.security.workspace_policy import (
             WorkspaceBoundaryError,
@@ -909,6 +921,20 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
             return self._handle_webui_skill_detail(request, m.group(1))
+        if got == "/api/webui/folders":
+            query = _parse_query(request.path)
+            return self._handle_folder_create(request, query)
+        m = re.match(r"^/api/webui/folders/([^/]+)/rename/?$", got)
+        if m:
+            query = _parse_query(request.path)
+            return self._handle_folder_rename(request, m.group(1), query)
+        m = re.match(r"^/api/webui/folders/([^/]+)/delete/?$", got)
+        if m:
+            return self._handle_folder_delete(request, m.group(1))
+        m = re.match(r"^/api/webui/sessions/([^/]+)/move-folder/?$", got)
+        if m:
+            query = _parse_query(request.path)
+            return self._handle_session_move_to_folder(request, m.group(1), query)
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
@@ -1059,7 +1085,17 @@ class GatewayHTTPHandler:
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(read_webui_sidebar_state())
+        state = read_webui_sidebar_state()
+        if self.session_manager is not None and state.get("session_folder"):
+            existing_keys = {
+                s.get("key") for s in list_webui_sessions(self.session_manager)
+                if isinstance(s.get("key"), str)
+            }
+            state["session_folder"] = {
+                k: v for k, v in state["session_folder"].items()
+                if k in existing_keys
+            }
+        return _http_json_response(state)
 
     def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
@@ -1082,6 +1118,61 @@ class GatewayHTTPHandler:
             self._log.exception("failed to write webui sidebar state")
             return _http_error(500, "failed to write sidebar state")
         return _http_json_response(state)
+
+    def _handle_folder_create(self, request: WsRequest, query: dict[str, list[str]]) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        name = _clean_folder_name(_query_first(query, "name"))
+        if not name:
+            return _http_error(400, "folder name is required")
+        try:
+            state = create_folder(name)
+        except ValueError as e:
+            return _http_error(400, str(e))
+        return _http_json_response({"folders": state["folders"]})
+
+    def _handle_folder_rename(
+        self, request: WsRequest, folder_id: str, query: dict[str, list[str]]
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        name = _clean_folder_name(_query_first(query, "name"))
+        if not name:
+            return _http_error(400, "folder name is required")
+        try:
+            state = rename_folder(folder_id, name)
+        except ValueError:
+            return _http_error(404, "folder not found")
+        return _http_json_response({"folders": state["folders"]})
+
+    def _handle_folder_delete(self, request: WsRequest, folder_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            state = delete_folder(folder_id)
+        except ValueError:
+            return _http_error(404, "folder not found")
+        return _http_json_response({"folders": state["folders"]})
+
+    def _handle_session_move_to_folder(
+        self, request: WsRequest, raw_key: str, query: dict[str, list[str]]
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session_key = _decode_api_key(raw_key)
+        if session_key is None:
+            return _http_error(400, "invalid session key")
+        raw_fid = _query_first(query, "folder_id")
+        folder_id: str | None = None
+        if raw_fid is not None:
+            folder_id = raw_fid
+        try:
+            state = move_session_to_folder(session_key, folder_id)
+        except ValueError:
+            return _http_error(404, "folder not found")
+        return _http_json_response(
+            {"folders": state["folders"], "session_folder": state["session_folder"]}
+        )
 
     # -- Static file serving ------------------------------------------------
 

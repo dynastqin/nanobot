@@ -534,6 +534,8 @@ describe("webui API helpers", () => {
       title_overrides: { "websocket:chat-1": "Release" },
       project_name_overrides: { "/Users/me/nanobot": "Core" },
       tags_by_key: {},
+      folders: [],
+      session_folder: {},
       collapsed_groups: {},
       view: {
         density: "compact" as const,

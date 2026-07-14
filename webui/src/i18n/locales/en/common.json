@@ -743,7 +743,16 @@
       "yesterday": "Yesterday",
       "earlier": "Earlier",
       "archived": "Archived"
-    }
+    },
+    "newFolder": "New Folder",
+    "folderName": "Folder name",
+    "createFolder": "Create",
+    "renameFolder": "Rename folder",
+    "deleteFolder": "Delete folder",
+    "deleteFolderConfirm": "Delete folder \"{{name}}\"? Chats inside will move back to Chats.",
+    "moveToFolder": "Move to folder",
+    "noChatsInFolder": "No chats yet",
+    "folderActions": "Folder actions"
   },
   "deleteConfirm": {
     "title": "Delete this chat?",

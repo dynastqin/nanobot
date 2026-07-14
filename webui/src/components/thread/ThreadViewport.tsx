@@ -40,6 +40,7 @@ interface ThreadViewportProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   skillNames?: string[];
+  slashCommandNames?: string[];
   forkBoundaryMessageCount?: number | null;
   compaction?: CompactionInfo | null;
   hasMoreBefore?: boolean;
@@ -114,6 +115,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   cliApps = [],
   mcpPresets = [],
   skillNames = [],
+  slashCommandNames = [],
   forkBoundaryMessageCount = null,
   compaction = null,
   hasMoreBefore = false,
@@ -518,6 +520,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   skillNames={skillNames}
+                  slashCommandNames={slashCommandNames}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   compaction={compaction}
                   onOpenFilePreview={onOpenFilePreview}

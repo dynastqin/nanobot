@@ -351,6 +351,10 @@ export function ThreadShell({
     () => skills.filter((s) => s.available).map((s) => s.name),
     [skills],
   );
+  const slashCommandNames = useMemo(
+    () => slashCommands.map((c) => c.command),
+    [slashCommands],
+  );
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
@@ -927,6 +931,7 @@ export function ThreadShell({
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           skillNames={skillNames}
+          slashCommandNames={slashCommandNames}
           forkBoundaryMessageCount={forkBoundaryMessageCount}
           compaction={compaction}
           hasMoreBefore={hasMoreBefore}

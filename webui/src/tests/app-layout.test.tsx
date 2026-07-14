@@ -968,6 +968,8 @@ describe("App layout", () => {
       archived_keys: ["websocket:chat-a"],
       title_overrides: { "websocket:chat-b": "Roadmap" },
       tags_by_key: {},
+      folders: [],
+      session_folder: {},
       collapsed_groups: {},
       view: {
         density: "comfortable",
@@ -1001,7 +1003,7 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
-      expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
+      expect(within(sidebar).getByText("Chats")).toBeInTheDocument(),
     );
     expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
@@ -1056,6 +1058,8 @@ describe("App layout", () => {
       archived_keys: [],
       title_overrides: {},
       tags_by_key: {},
+      folders: [],
+      session_folder: {},
       collapsed_groups: {},
       view: {
         density: "comfortable",
@@ -1086,8 +1090,7 @@ describe("App layout", () => {
     );
     const group = within(sidebar).getByText("Chats").closest("section");
     expect(group).toBeTruthy();
-    const labels = within(group as HTMLElement)
-      .getAllByRole("button")
+    const labels = Array.from(group?.querySelectorAll("ul button") ?? [])
       .map((button) => button.textContent?.trim())
       .filter(Boolean);
 

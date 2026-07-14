@@ -5,7 +5,7 @@ import {
   fetchSidebarState,
   updateSidebarState as persistSidebarState,
 } from "@/lib/api";
-import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
+import type { ChatSummary, Folder, SidebarStatePayload } from "@/lib/types";
 
 export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   schema_version: 1,
@@ -14,6 +14,8 @@ export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   title_overrides: {},
   project_name_overrides: {},
   tags_by_key: {},
+  folders: [],
+  session_folder: {},
   collapsed_groups: {},
   view: {
     density: "comfortable",
@@ -93,6 +95,16 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     title_overrides: stringMap(value.title_overrides),
     project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
+    folders: Array.isArray(value.folders) ? value.folders.filter(
+      (f): f is Folder => typeof f === "object" && f !== null
+        && typeof f.id === "string" && typeof f.name === "string"
+    ) : [],
+    session_folder: typeof value.session_folder === "object" && !Array.isArray(value.session_folder)
+      ? Object.fromEntries(
+          Object.entries(value.session_folder as Record<string, unknown>)
+            .filter(([, v]) => typeof v === "string")
+        ) as Record<string, string>
+      : {},
     collapsed_groups: boolMap(value.collapsed_groups),
     view: {
       density,
@@ -124,6 +136,7 @@ function pruneMissingSessions(
     archived_keys: filterKeys(state.archived_keys),
     title_overrides: filterMap(state.title_overrides),
     tags_by_key: filterMap(state.tags_by_key),
+    session_folder: filterMap(state.session_folder),
   };
 }
 

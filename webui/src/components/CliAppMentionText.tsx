@@ -11,7 +11,8 @@ export type CliAppMentionSegment =
 export type CapabilityMentionSegment =
   | CliAppMentionSegment
   | { kind: "mcp"; text: string; preset: McpPresetInfo }
-  | { kind: "skill"; text: string; name: string };
+  | { kind: "skill"; text: string; name: string }
+  | { kind: "command"; text: string; name: string };
 
 export function cliAppInitials(app: CliAppInfo): string {
   const value = app.display_name || app.name;
@@ -78,8 +79,15 @@ export function splitCapabilityMentionSegments(
   cliApps: CliAppInfo[],
   mcpPresets: McpPresetInfo[] = [],
   skillNames: string[] = [],
+  slashCommandNames: string[] = [],
 ): CapabilityMentionSegment[] {
-  if (!value || (cliApps.length === 0 && mcpPresets.length === 0 && skillNames.length === 0)) {
+  if (
+    !value ||
+    (cliApps.length === 0 &&
+      mcpPresets.length === 0 &&
+      skillNames.length === 0 &&
+      slashCommandNames.length === 0)
+  ) {
     return value ? [{ kind: "text", text: value }] : [];
   }
   const cliAppsByName = new Map(
@@ -93,12 +101,20 @@ export function splitCapabilityMentionSegments(
       .map((preset) => [preset.name.toLowerCase(), preset]),
   );
   const skillNameSet = new Set(skillNames.map((n) => n.toLowerCase()));
-  if (cliAppsByName.size === 0 && mcpPresetsByName.size === 0 && skillNameSet.size === 0) {
+  const slashCommandNameSet = new Set(
+    slashCommandNames.map((n) => n.replace(/^\//, "").toLowerCase()),
+  );
+  if (
+    cliAppsByName.size === 0 &&
+    mcpPresetsByName.size === 0 &&
+    skillNameSet.size === 0 &&
+    slashCommandNameSet.size === 0
+  ) {
     return [{ kind: "text", text: value }];
   }
 
   const segments: CapabilityMentionSegment[] = [];
-  const mentionRe = /(^|[\s([{])[@$]([a-z0-9_-]+)\b/gi;
+  const mentionRe = /(^|[\s([{])[@$/]([a-z0-9_-]+)\b/gi;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = mentionRe.exec(value)) !== null) {
@@ -136,6 +152,20 @@ export function splitCapabilityMentionSegments(
         name: key,
       });
       cursor = mentionEnd;
+    } else if (delimiter === "/") {
+      if (!slashCommandNameSet.has(key)) continue;
+
+      const mentionStart = match.index + prefix.length;
+      const mentionEnd = mentionStart + name.length + 1;
+      if (mentionStart > cursor) {
+        segments.push({ kind: "text", text: value.slice(cursor, mentionStart) });
+      }
+      segments.push({
+        kind: "command",
+        text: value.slice(mentionStart, mentionEnd),
+        name: key,
+      });
+      cursor = mentionEnd;
     }
   }
   if (cursor < value.length) {
@@ -149,13 +179,21 @@ export function CliAppMentionText({
   cliApps,
   mcpPresets = [],
   skillNames = [],
+  slashCommandNames = [],
 }: {
   text: string;
   cliApps: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   skillNames?: string[];
+  slashCommandNames?: string[];
 }) {
-  const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets, skillNames);
+  const segments = splitCapabilityMentionSegments(
+    text,
+    cliApps,
+    mcpPresets,
+    skillNames,
+    slashCommandNames,
+  );
   if (!segments.some((segment) => segment.kind !== "text")) return <>{text}</>;
   return (
     <>
@@ -175,6 +213,13 @@ export function CliAppMentionText({
           <McpPresetMentionToken
             key={`mcp-${segment.preset.name}-${index}`}
             preset={segment.preset}
+            label={segment.text}
+            variant="message"
+          />
+        );
+        if (segment.kind === "command") return (
+          <CommandMentionToken
+            key={`command-${segment.name}-${index}`}
             label={segment.text}
             variant="message"
           />
@@ -337,6 +382,40 @@ export function SkillMentionToken({
         style={{ lineHeight: "inherit" }}
       >
         $
+      </span>
+      {mentionName}
+    </span>
+  );
+}
+
+export function CommandMentionToken({
+  label,
+  variant,
+  isHero: _isHero = false,
+}: {
+  label: string;
+  variant: "composer" | "message";
+  isHero?: boolean;
+}) {
+  const color = "rgb(56, 189, 248)";
+  const mentionName = label.startsWith("/") ? label.slice(1) : label;
+  const testIdPrefix = variant === "composer" ? "composer" : "message";
+
+  return (
+    <span
+      data-testid={`${testIdPrefix}-command-mention-${mentionName}`}
+      title={`Command: /${mentionName}`}
+      className="relative inline transition-[color,text-shadow] duration-150"
+      style={{
+        color,
+        textShadow: `0 0 10px ${alphaColor(color, 24)}`,
+      }}
+    >
+      <span
+        className="relative inline-block"
+        style={{ lineHeight: "inherit" }}
+      >
+        /
       </span>
       {mentionName}
     </span>

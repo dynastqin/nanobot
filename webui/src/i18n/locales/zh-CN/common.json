@@ -743,7 +743,16 @@
       "yesterday": "昨天",
       "earlier": "更早",
       "archived": "已归档"
-    }
+    },
+    "newFolder": "新建文件夹",
+    "folderName": "文件夹名称",
+    "createFolder": "创建",
+    "renameFolder": "重命名文件夹",
+    "deleteFolder": "删除文件夹",
+    "deleteFolderConfirm": "确定删除文件夹「{{name}}」？其中的聊天将移回 Chats。",
+    "moveToFolder": "移动到文件夹",
+    "noChatsInFolder": "暂无聊天",
+    "folderActions": "文件夹操作"
   },
   "deleteConfirm": {
     "title": "删除这个对话？",

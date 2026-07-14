@@ -1065,7 +1065,7 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
   }
   if (name) {
     const argsDetail = previewToolEventDetail(toolEvent);
-    return { kind: "tool", label: "Using", detail: argsDetail ? `${name} · ${argsDetail}` : name, error: errored };
+    return { kind: "tool", label: "Using", detail: argsDetail ? `${name}(${argsDetail})` : name, error: errored };
   }
   if (/done|complete|success/i.test(trimmed)) {
     return { kind: "done", label: "Done", detail: trimmed };
@@ -1413,15 +1413,17 @@ function previewMcpArgs(argsObject: unknown): string {
     return previewScalar(argsObject) ?? "";
   }
   const record = argsObject as Record<string, unknown>;
-  for (const key of ["url", "query", "q", "path", "name", "id", "title", "message", "text"]) {
-    const preview = previewScalar(record[key]);
-    if (preview) return `${key}: ${preview}`;
+  // for (const key of ["url", "query", "q", "path", "name", "id", "title", "message", "text"]) {
+  //   const preview = previewScalar(record[key]);
+  //   if (preview) return `${preview}`;
+  // }
+  const entries: string[] = [];
+  for (const value of Object.values(record)) {
+    const p = previewScalar(value);
+    if (p !== null) entries.push(p);
+    if (entries.length >= 2) break;
   }
-  const entries = Object.entries(record)
-    .filter(([, value]) => previewScalar(value) !== null)
-    .slice(0, 2)
-    .map(([key, value]) => `${key}: ${previewScalar(value)}`);
-  return entries.join(" · ");
+  return entries.join(", ");
 }
 
 function mcpRunFromToolName(
@@ -1736,7 +1738,7 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const labelText = t(cliRunLabelKey(run, active), {
     defaultValue: cliRunLabelDefault(run, active),
   });
-  const detail = `@${run.name}${args ? ` ${args}` : ""}${run.error ? ` · ${run.error}` : ""}`;
+  const detail = `@${run.name}${args ? ` ${args}` : ""}`;
   const labelColor = failed
     ? "text-red-600 dark:text-red-400"
     : rowActive
@@ -1819,7 +1821,7 @@ function McpRunRow({ run, active, preset, toolEvent }: { run: McpRunSummary; act
   const labelText = t(mcpRunLabelKey(run, active), {
     defaultValue: mcpRunLabelDefault(run, active),
   });
-  const detail = `${displayName} · ${run.toolName}${run.argsPreview ? ` ${run.argsPreview}` : ""}${run.error ? ` · ${run.error}` : ""}`;
+  const detail = `${displayName} · ${run.toolName}${run.argsPreview ? `(${run.argsPreview})` : ""}`;
   const labelColor = failed
     ? "text-red-600 dark:text-red-400"
     : rowActive

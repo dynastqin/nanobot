@@ -18,6 +18,8 @@ interface SessionSearchDialogProps {
   activeKey: string | null;
   loading: boolean;
   titleOverrides?: Record<string, string>;
+  sessionFolder?: Record<string, string>;
+  folders?: Array<{ id: string; name: string }>;
   onOpenChange: (open: boolean) => void;
   onSelect: (key: string) => void;
 }
@@ -28,6 +30,8 @@ export function SessionSearchDialog({
   activeKey,
   loading,
   titleOverrides = {},
+  sessionFolder = {},
+  folders = [],
   onOpenChange,
   onSelect,
 }: SessionSearchDialogProps) {
@@ -173,6 +177,7 @@ export function SessionSearchDialog({
                     preview.toLowerCase() !== title.trim().toLowerCase();
                   const highlighted = index === highlightedIndex;
                   const active = session.key === activeKey;
+                  const folderName = folders.find((f) => f.id === sessionFolder[session.key])?.name;
                   return (
                     <li key={session.key}>
                       <button
@@ -193,6 +198,11 @@ export function SessionSearchDialog({
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[14px] font-medium leading-5">
                             {title}
+                            {folderName ? (
+                              <span className="ml-2 text-[11px] text-muted-foreground/60">
+                                {folderName}
+                              </span>
+                            ) : null}
                           </span>
                           {showPreview ? (
                             <span
