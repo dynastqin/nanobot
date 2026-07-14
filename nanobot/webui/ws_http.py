@@ -866,6 +866,8 @@ class GatewayHTTPHandler:
             expires_at=expires_at,
             expires_in=expires_in,
             filename=filename,
+            created_at=time.time(),
+            session_key=decoded_key,
         )
         if url is None:
             return _http_error(400, "cannot sign path outside workspace")

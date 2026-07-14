@@ -35,11 +35,13 @@ class WebUIMediaGateway:
         logger: Any,
         media_dir: Callable[[str | None], Path] | None = None,
         secret: bytes | None = None,
+        agent_info: str = "",
     ) -> None:
         self.workspace_path = workspace_path
         self.logger = logger
         self._media_dir = media_dir or (lambda channel=None: get_media_dir(channel))
         self.secret = secret or secrets.token_bytes(32)
+        self.agent_info = agent_info
 
     def serve_signed_media(
         self,
@@ -103,6 +105,8 @@ class WebUIMediaGateway:
         expires_at: int = 0,
         expires_in: int = 0,
         filename: str = "",
+        created_at: float = 0.0,
+        session_key: str = "",
     ) -> str | None:
         return create_artifact_token(
             abs_path,
@@ -111,6 +115,8 @@ class WebUIMediaGateway:
             expires_at=expires_at,
             expires_in=expires_in,
             filename=filename,
+            created_at=created_at,
+            session_key=session_key,
         )
 
     def serve_artifact_token(
@@ -127,4 +133,5 @@ class WebUIMediaGateway:
             outputs_dir=outputs_dir,
             request=request,
             view_source=view_source,
+            agent_info=self.agent_info,
         )

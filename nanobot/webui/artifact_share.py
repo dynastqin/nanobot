@@ -15,12 +15,18 @@ import secrets
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote as _url_quote
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
-from nanobot.webui.http_utils import case_insensitive_header, http_error, http_response
+from nanobot.webui.http_utils import (
+    case_insensitive_header,
+    http_error,
+    http_response,
+    safe_host_header,
+)
 from nanobot.webui.media_api import _parse_single_byte_range
 
 _logger = logging.getLogger(__name__)
@@ -68,6 +74,13 @@ _HTML_ARTIFACT_HEADERS: tuple[tuple[str, str], ...] = (
     ("Content-Security-Policy",
      "sandbox; default-src 'self' 'unsafe-inline' data: blob:"),
 )
+
+
+def _format_timestamp(ts: float) -> str:
+    if not ts or ts <= 0:
+        return "unknown"
+    from datetime import datetime
+    return datetime.fromtimestamp(ts).strftime("%Y/%m/%d %H:%M:%S")
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +134,8 @@ def create_artifact_token(
     expires_at: int = 0,
     expires_in: int = 0,
     filename: str = "",
+    created_at: float = 0.0,
+    session_key: str = "",
 ) -> str | None:
     """Create a short token that maps to *abs_path* and return the URL path.
 
@@ -142,6 +157,8 @@ def create_artifact_token(
         "expires_at": expires_at,
         "expires_in": expires_in,
         "filename": filename,
+        "created_at": created_at or time.time(),
+        "session_key": session_key,
     }
     _save_artifact_shares(outputs_dir, shares)
     return url
@@ -154,6 +171,7 @@ def serve_artifact_token(
     outputs_dir: Path,
     request: WsRequest | None = None,
     view_source: bool = False,
+    agent_info: str = "",
 ) -> Response:
     """Serve the file mapped by *token*.
 
@@ -217,6 +235,33 @@ def serve_artifact_token(
     if not candidate.is_file():
         return http_error(404, "file not found")
 
+    created_at = entry.get("created_at", 0.0)
+    session_key = entry.get("session_key", "")
+
+    artifact_info_headers: list[tuple[str, str]] = []
+
+    if agent_info:
+        artifact_info_headers.append(("X-AGENT-INFO", agent_info))
+
+    artifact_info_headers.append(("X-ARTIFACT-PATH", str(candidate)))
+
+    if isinstance(expires_at, (int, float)) and expires_at > 0:
+        artifact_info_headers.append(("X-EXPIRES-AT", _format_timestamp(expires_at)))
+    else:
+        artifact_info_headers.append(("X-EXPIRES-AT", "never"))
+
+    artifact_info_headers.append(("X-CREATED-AT", _format_timestamp(created_at)))
+
+    if session_key and request is not None:
+        host = safe_host_header(case_insensitive_header(request.headers, "Host"))
+        if host:
+            proto = case_insensitive_header(request.headers, "X-Forwarded-Proto")
+            scheme = "https" if proto == "https" else "http"
+            artifact_info_headers.append(
+                ("X-SESSION-URL",
+                 f"{scheme}://{host}/#/chat/{_url_quote(session_key, safe='')}")
+            )
+
     mime, _ = mimetypes.guess_type(filename or candidate.name)
     if not mime or mime not in ARTIFACT_INLINE_MIMES:
         mime = "application/octet-stream"
@@ -227,6 +272,7 @@ def serve_artifact_token(
         ("Accept-Ranges", "bytes"),
         ("Cache-Control", "private, max-age=60"),
         ("X-Content-Type-Options", "nosniff"),
+        *artifact_info_headers,
     ]
 
     if mime == "image/svg+xml":
@@ -249,6 +295,7 @@ def serve_artifact_token(
             extra_headers=[
                 ("Cache-Control", "private, max-age=60"),
                 ("X-Content-Type-Options", "nosniff"),
+                *artifact_info_headers,
             ],
         )
 
@@ -272,6 +319,7 @@ def serve_artifact_token(
                     ("Accept-Ranges", "bytes"),
                     ("Content-Range", f"bytes */{size}"),
                     ("X-Content-Type-Options", "nosniff"),
+                    *artifact_info_headers,
                 ],
             )
         try:

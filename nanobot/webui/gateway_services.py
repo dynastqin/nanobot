@@ -48,9 +48,13 @@ def build_gateway_services(
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
+
+    from nanobot import __version__
+    
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
+        agent_info=f"nanobot v{__version__}",
     )
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(

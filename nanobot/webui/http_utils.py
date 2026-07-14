@@ -66,7 +66,6 @@ def http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
     headers = Headers(
         [
             ("Date", email.utils.formatdate(usegmt=True)),
-            ("Connection", "close"),
             ("Content-Length", str(len(body))),
             ("Content-Type", "application/json; charset=utf-8"),
         ]
@@ -84,7 +83,6 @@ def http_response(
 ) -> Response:
     headers = [
         ("Date", email.utils.formatdate(usegmt=True)),
-        ("Connection", "close"),
         ("Content-Length", str(len(body))),
         ("Content-Type", content_type),
     ]
