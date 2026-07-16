@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Bot,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -525,6 +526,47 @@ function countActivity(
   };
 }
 
+export interface SubagentGroup {
+  taskId: string;
+  title: string;
+  messages: UIMessage[];
+}
+
+/** Split activity messages into parent and subagent groups by ``subagentTaskId``. */
+export function groupMessagesBySubagent(messages: UIMessage[]): {
+  parentMessages: UIMessage[];
+  subagentGroups: SubagentGroup[];
+} {
+  const parentMessages: UIMessage[] = [];
+  const subagentMap = new Map<string, { title: string; messages: UIMessage[] }>();
+
+  for (const msg of messages) {
+    if (msg.subagentTaskId) {
+      const group = subagentMap.get(msg.subagentTaskId);
+      if (group) {
+        group.messages.push(msg);
+        if (msg.subagentTitle) group.title = msg.subagentTitle;
+      } else {
+        subagentMap.set(msg.subagentTaskId, {
+          title: msg.subagentTitle || "Sub-agent",
+          messages: [msg],
+        });
+      }
+    } else {
+      parentMessages.push(msg);
+    }
+  }
+
+  return {
+    parentMessages,
+    subagentGroups: Array.from(subagentMap.entries()).map(([taskId, g]) => ({
+      taskId,
+      title: g.title,
+      messages: g.messages,
+    })),
+  };
+}
+
 interface AgentActivityClusterProps {
   messages: UIMessage[];
   /** True while the session turn is still running (drives “Working…” copy + header sheen). */
@@ -536,6 +578,8 @@ interface AgentActivityClusterProps {
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
+  /** When provided, subagent groups render as clickable links that open the drawer. */
+  onOpenSubagent?: (taskId: string) => void;
 }
 
 /**
@@ -551,6 +595,7 @@ export function AgentActivityCluster({
   mcpPresets = [],
   onOpenFilePreview,
   onOpenLink,
+  onOpenSubagent,
 }: AgentActivityClusterProps) {
   const fileEdits = useMemo(
     () => summarizeFileEdits(collectFileEdits(messages), isTurnStreaming),
@@ -575,8 +620,14 @@ export function AgentActivityCluster({
     || counts.fileCount > 0;
   const hasOnlyFileActivity = fileEdits.length > 0 && messages.every(messageHasOnlyFileActivity);
 
-  const groups = useMemo(() => groupActivityMessages(messages), [messages]);
-  const rounds = useMemo(() => groupActivityRounds(groups), [groups]);
+  const { parentMessages, subagentGroups } = useMemo(
+    () => groupMessagesBySubagent(messages),
+    [messages],
+  );
+  const hasSubagentActivity = subagentGroups.length > 0;
+
+  const parentGroups = useMemo(() => groupActivityMessages(parentMessages), [parentMessages]);
+  const parentRounds = useMemo(() => groupActivityRounds(parentGroups), [parentGroups]);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -599,7 +650,7 @@ export function AgentActivityCluster({
 
   if (!hasVisibleActivity) return null;
 
-  if (hasOnlyFileActivity) {
+  if (hasOnlyFileActivity && !hasSubagentActivity) {
     const singleFilePath = counts.fileCount === 1 ? counts.primaryFilePath : undefined;
     const singleFileTooltipPath = counts.fileCount === 1 ? counts.primaryFileTooltipPath : undefined;
     const hasLiveEditingFiles = isTurnStreaming && counts.hasEditingFiles;
@@ -624,8 +675,8 @@ export function AgentActivityCluster({
 
   return (
     <div className={cn("flex w-full flex-col gap-2", hasBodyBelow && "mb-2")}>
-      {rounds.map((round, roundIndex) => {
-        const isLastRound = roundIndex === rounds.length - 1;
+      {parentRounds.map((round, roundIndex) => {
+        const isLastRound = roundIndex === parentRounds.length - 1;
         const reasoningIsLast = isLastRound && round.traces.length === 0;
 
         return (
@@ -642,6 +693,26 @@ export function AgentActivityCluster({
           />
         );
       })}
+      {subagentGroups.map((group) =>
+        onOpenSubagent ? (
+          <SubagentLinkButton
+            key={`subagent:${group.taskId}`}
+            group={group}
+            isTurnStreaming={isTurnStreaming}
+            onClick={() => onOpenSubagent(group.taskId)}
+          />
+        ) : (
+          <SubagentActivityGroup
+            key={`subagent:${group.taskId}`}
+            group={group}
+            isTurnStreaming={isTurnStreaming}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+            onOpenFilePreview={onOpenFilePreview}
+            onOpenLink={onOpenLink}
+          />
+        ),
+      )}
       {totalDuration && (
         <div className="flex items-center gap-1.5 px-1">
           <span className="text-[11px] text-muted-foreground/45">
@@ -1031,6 +1102,16 @@ function toolEventHasError(event?: ToolProgressEvent): boolean {
   return false;
 }
 
+function extractArgField(event: ToolProgressEvent | undefined, field: string): string {
+  if (!event) return "";
+  const args = parseToolEventArguments(event);
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "";
+  const record = args as Record<string, unknown>;
+  const val = record[field];
+  if (typeof val === "string" && val.trim()) return val.trim();
+  return "";
+}
+
 function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDescription {
   const trimmed = line.trim();
   const functionMatch = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
@@ -1041,6 +1122,14 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
   const plainWebReadTrace =
     !!parsedUrl && /\b(fetch(?:ing|ed)?|read(?:ing)?|opened?|opening)\b/i.test(trimmed);
   const errored = toolEventHasError(toolEvent);
+  if (name === "spawn") {
+    const spawnLabel = extractArgField(toolEvent, "label");
+    return { kind: "tool", label: "Using", detail: spawnLabel ? `spawn ${spawnLabel}` : "spawn", error: errored };
+  }
+  if (name === "long_task") {
+    const summary = extractArgField(toolEvent, "ui_summary");
+    return { kind: "tool", label: "Using", detail: summary ? `long_task ${summary}` : "long_task", error: errored };
+  }
   if (/search/i.test(name)) {
     const provider = extractProviderFromResult(toolEvent?.result);
     return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed), provider, error: errored };
@@ -1888,4 +1977,162 @@ function alphaColor(color: string, percent: number): string {
     return `${color}${alpha}`;
   }
   return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+}
+
+/** Clickable chip shown in place of inline subagent activity when the drawer is available. */
+function SubagentLinkButton({
+  group,
+  isTurnStreaming,
+  onClick,
+}: {
+  group: SubagentGroup;
+  isTurnStreaming: boolean;
+  onClick: () => void;
+}) {
+  const toolCount = group.messages.filter((m) => m.kind === "trace").length;
+  const reasoningCount = group.messages.filter((m) => isReasoningOnlyAssistant(m)).length;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-50/40 px-3 py-2",
+        "text-left transition-colors hover:bg-violet-100/50 hover:border-violet-400/50",
+        "dark:bg-violet-950/20 dark:hover:bg-violet-950/40",
+      )}
+    >
+      <Bot className="h-4 w-4 shrink-0 text-violet-500/70" />
+      <div className="min-w-0 flex-1">
+        <StreamingLabelSheen
+          active={isTurnStreaming}
+          className="text-[12.5px] font-medium text-violet-700/80 dark:text-violet-300/80"
+        >
+          {group.title}
+        </StreamingLabelSheen>
+        <div className="text-[11px] text-muted-foreground/65">
+          {[
+            reasoningCount ? `${reasoningCount} thoughts` : "",
+            toolCount ? `${toolCount} tool calls` : "",
+          ]
+            .filter(Boolean)
+            .join(", ") || "View details"}
+        </div>
+      </div>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+    </button>
+  );
+}
+
+/** Collapsible block that renders a subagent's inline activity nested under a
+ * labelled header with a left accent border. */
+function SubagentActivityGroup({
+  group,
+  isTurnStreaming,
+  cliAppsByName,
+  mcpPresetsByName,
+  onOpenFilePreview,
+  onOpenLink,
+}: {
+  group: SubagentGroup;
+  isTurnStreaming: boolean;
+  cliAppsByName: Map<string, CliAppInfo>;
+  mcpPresetsByName: Map<string, McpPresetInfo>;
+  onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
+}) {
+  const activityGroups = useMemo(() => groupActivityMessages(group.messages), [group.messages]);
+  const rounds = useMemo(() => groupActivityRounds(activityGroups), [activityGroups]);
+  const fileEdits = useMemo(
+    () => summarizeFileEdits(collectFileEdits(group.messages), isTurnStreaming),
+    [group.messages, isTurnStreaming],
+  );
+
+  const hasActivity = activityGroups.length > 0;
+  if (!hasActivity && !fileEdits.length) return null;
+
+  return (
+    <SubagentActivityBlock
+      title={group.title}
+      isTurnStreaming={isTurnStreaming}
+      rounds={rounds}
+      fileEdits={fileEdits}
+      cliAppsByName={cliAppsByName}
+      mcpPresetsByName={mcpPresetsByName}
+      onOpenFilePreview={onOpenFilePreview}
+      onOpenLink={onOpenLink}
+    />
+  );
+}
+
+function SubagentActivityBlock({
+  title,
+  isTurnStreaming,
+  rounds,
+  fileEdits,
+  cliAppsByName,
+  mcpPresetsByName,
+  onOpenFilePreview,
+  onOpenLink,
+}: {
+  title: string;
+  isTurnStreaming: boolean;
+  rounds: ActivityRound[];
+  fileEdits: FileEditSummary[];
+  cliAppsByName: Map<string, CliAppInfo>;
+  mcpPresetsByName: Map<string, McpPresetInfo>;
+  onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="border-l-2 border-violet-400/40 pl-3">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "group flex max-w-full items-center gap-1.5 rounded-md px-1 py-1",
+          "text-[12.5px] text-muted-foreground/72 transition-colors hover:text-muted-foreground",
+        )}
+        aria-expanded={open}
+      >
+        <Bot className="h-3.5 w-3.5 shrink-0 text-violet-500/70" />
+        <StreamingLabelSheen active={isTurnStreaming} className="min-w-0 text-violet-600/80 dark:text-violet-400/80">
+          {title}
+        </StreamingLabelSheen>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-transform duration-200",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="mt-1 space-y-2">
+          {rounds.map((round, roundIndex) => {
+            const isLastRound = roundIndex === rounds.length - 1;
+            const reasoningIsLast = isLastRound && round.traces.length === 0;
+            return (
+              <ActivityRoundContainer
+                key={`sub:${roundIndex}`}
+                round={round}
+                isLastRound={isLastRound}
+                reasoningIsLast={reasoningIsLast}
+                isTurnStreaming={isTurnStreaming}
+                cliAppsByName={cliAppsByName}
+                mcpPresetsByName={mcpPresetsByName}
+                onOpenFilePreview={onOpenFilePreview}
+                onOpenLink={onOpenLink}
+              />
+            );
+          })}
+          {fileEdits.length > 0 && (
+            <FileEditGroup edits={fileEdits} onOpenFilePreview={onOpenFilePreview} />
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

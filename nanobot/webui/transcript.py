@@ -1281,6 +1281,28 @@ def replay_transcript_to_ui_messages(
         message_turn_id = message.get("turnId")
         return not turn_id or not message_turn_id or turn_id == message_turn_id
 
+    def _subagent_fields(rec: dict[str, Any]) -> dict[str, Any]:
+        """Extract subagent grouping fields from a transcript record."""
+        fields: dict[str, Any] = {}
+        task_id = rec.get("_subagent_task_id")
+        if isinstance(task_id, str) and task_id:
+            fields["subagentTaskId"] = task_id
+        title = rec.get("_subagent_title")
+        if isinstance(title, str) and title:
+            fields["subagentTitle"] = title
+        return fields
+
+    def _subagent_match(
+        candidate: dict[str, Any],
+        sf: dict[str, Any],
+    ) -> bool:
+        """Check that *candidate* and *sf* belong to the same subagent."""
+        sf_id = sf.get("subagentTaskId")
+        cand_id = candidate.get("subagentTaskId")
+        if not sf_id and not cand_id:
+            return True
+        return sf_id == cand_id
+
     def _ensure_activity_segment() -> str:
         return active_activity_segment_id or _new_activity_segment()
 
@@ -1300,8 +1322,11 @@ def replay_transcript_to_ui_messages(
         chunk: str,
         idx: int,
         turn_fields: dict[str, Any] | None = None,
+        subagent_fields: dict[str, Any] | None = None,
     ) -> None:
         turn_fields = turn_fields or {}
+        sf = subagent_fields or {}
+        sf_task_id = sf.get("subagentTaskId")
         for i in range(len(prev) - 1, -1, -1):
             candidate = prev[i]
             if candidate.get("role") == "user":
@@ -1320,12 +1345,24 @@ def replay_transcript_to_ui_messages(
                 or has_answer
                 or candidate.get("isStreaming")
             ):
+                # Only merge into a reasoning stream belonging to the same
+                # subagent. Concurrent subagents may interleave reasoning
+                # chunks; matching by subagentTaskId prevents chunks from
+                # one subagent being appended to another's stream.
+                cand_sf_id = candidate.get("subagentTaskId")
+                if sf_task_id and cand_sf_id and sf_task_id != cand_sf_id:
+                    continue
+                if sf_task_id and not cand_sf_id:
+                    continue
+                if not sf_task_id and cand_sf_id:
+                    continue
                 prev[i] = {
                     **candidate,
                     "reasoning": (str(candidate.get("reasoning") or "")) + chunk,
                     "reasoningStreaming": True,
                     "activitySegmentId": candidate.get("activitySegmentId") or _ensure_activity_segment(),
                     **turn_fields,
+                    **(sf if not cand_sf_id else {}),
                 }
                 return
             if not has_answer and candidate.get("isStreaming"):
@@ -1349,6 +1386,7 @@ def replay_transcript_to_ui_messages(
                 "reasoningStreaming": True,
                 "activitySegmentId": segment,
                 **turn_fields,
+                **sf,
                 "createdAt": _ts_base + idx,
             },
         )
@@ -1405,11 +1443,27 @@ def replay_transcript_to_ui_messages(
                 buffer_parts = []
             return
 
-    def close_reasoning(prev: list[dict[str, Any]]) -> None:
+    def close_reasoning(
+        prev: list[dict[str, Any]],
+        subagent_fields: dict[str, Any] | None = None,
+    ) -> None:
+        sf_task_id = (subagent_fields or {}).get("subagentTaskId")
         for i in range(len(prev) - 1, -1, -1):
-            if prev[i].get("reasoningStreaming"):
-                prev[i] = {**prev[i], "reasoningStreaming": False}
-                return
+            candidate = prev[i]
+            if not candidate.get("reasoningStreaming"):
+                continue
+            # When closing reasoning, only close the stream matching
+            # the same subagent so that concurrent subagents don't
+            # prematurely terminate each other's reasoning.
+            cand_sf_id = candidate.get("subagentTaskId")
+            if sf_task_id and cand_sf_id and sf_task_id != cand_sf_id:
+                continue
+            if sf_task_id and not cand_sf_id:
+                continue
+            if not sf_task_id and cand_sf_id:
+                continue
+            prev[i] = {**candidate, "reasoningStreaming": False}
+            return
 
     def is_reasoning_only_placeholder(m: dict[str, Any]) -> bool:
         return (
@@ -1421,15 +1475,27 @@ def replay_transcript_to_ui_messages(
             and not m.get("media")
         )
 
-    def is_tool_trace_at(index: int) -> bool:
-        m = messages[index] if 0 <= index < len(messages) else None
-        return bool(m and m.get("kind") == "trace")
+    def is_tool_trace_at(index: int, *, sf_id: str | None = None) -> bool:
+        """Check whether a tool trace belonging to the same owner follows
+        at or after *index*, skipping interleaved subagent messages."""
+        for j in range(index, len(messages)):
+            m = messages[j]
+            cand_sf_id = m.get("subagentTaskId")
+            if sf_id and cand_sf_id and sf_id != cand_sf_id:
+                continue
+            if sf_id and not cand_sf_id:
+                continue
+            if not sf_id and cand_sf_id:
+                continue
+            return m.get("kind") == "trace"
+        return False
 
     def prune_reasoning_only() -> None:
         nonlocal messages
         kept: list[dict[str, Any]] = []
         for i, m in enumerate(messages):
-            if is_reasoning_only_placeholder(m) and not is_tool_trace_at(i + 1):
+            sf_id = m.get("subagentTaskId") if isinstance(m.get("subagentTaskId"), str) else None
+            if is_reasoning_only_placeholder(m) and not is_tool_trace_at(i + 1, sf_id=sf_id):
                 continue
             kept.append(m)
         messages = kept
@@ -1498,6 +1564,7 @@ def replay_transcript_to_ui_messages(
         edits: list[dict[str, Any]],
         idx: int,
         turn_fields: dict[str, Any] | None = None,
+        subagent_fields: dict[str, Any] | None = None,
     ) -> None:
         nonlocal active_file_edit_segment_id
         turn_fields = turn_fields or {}
@@ -1528,6 +1595,7 @@ def replay_transcript_to_ui_messages(
                     "fileEdits": [],
                     "activitySegmentId": segment,
                     **turn_fields,
+                    **(subagent_fields or {}),
                     "createdAt": _ts_base + idx,
                 },
             )
@@ -1555,11 +1623,13 @@ def replay_transcript_to_ui_messages(
             else:
                 index_by_key[key] = len(existing)
                 existing.append(dict(edit))
+        sf2 = subagent_fields if not last.get("subagentTaskId") else {}
         messages[target_index] = {
             **last,
             "fileEdits": existing,
             "activitySegmentId": last.get("activitySegmentId") or segment,
             **turn_fields,
+            **sf2,
         }
 
     for idx, rec in enumerate(lines):
@@ -1605,6 +1675,7 @@ def replay_transcript_to_ui_messages(
                     [e for e in raw_edits if isinstance(e, dict)],
                     idx,
                     _turn_fields(rec, "activity"),
+                    _subagent_fields(rec),
                 )
             continue
 
@@ -1685,13 +1756,17 @@ def replay_transcript_to_ui_messages(
             if not isinstance(chunk, str) or not chunk:
                 continue
             close_file_edit_phase_before_activity()
-            attach_reasoning_chunk(messages, chunk, idx, _turn_fields(rec, "reasoning"))
+            attach_reasoning_chunk(
+                messages, chunk, idx,
+                _turn_fields(rec, "reasoning"),
+                _subagent_fields(rec),
+            )
             continue
 
         if ev == "reasoning_end":
             if suppress_until_turn_end:
                 continue
-            close_reasoning(messages)
+            close_reasoning(messages, _subagent_fields(rec))
             continue
 
         if ev == "message":
@@ -1707,8 +1782,12 @@ def replay_transcript_to_ui_messages(
                 if not isinstance(line, str) or not line:
                     continue
                 close_file_edit_phase_before_activity()
-                attach_reasoning_chunk(messages, line, idx, _turn_fields(rec, "reasoning"))
-                close_reasoning(messages)
+                attach_reasoning_chunk(
+                    messages, line, idx,
+                    _turn_fields(rec, "reasoning"),
+                    _subagent_fields(rec),
+                )
+                close_reasoning(messages, _subagent_fields(rec))
                 continue
             if kind in ("tool_hint", "progress"):
                 structured_events = _normalize_tool_events(rec.get("tool_events"))
@@ -1733,6 +1812,7 @@ def replay_transcript_to_ui_messages(
                     and last.get("kind") == "trace"
                     and not last.get("isStreaming")
                     and (last.get("activitySegmentId") in (None, segment))
+                    and _subagent_match(last, _subagent_fields(rec))
                 ):
                     prev_traces = list(last.get("traces") or [last.get("content")])
                     if structured:
@@ -1741,6 +1821,7 @@ def replay_transcript_to_ui_messages(
                             continue
                     else:
                         merged_traces = prev_traces + trace_lines
+                    sf = _subagent_fields(rec) if not last.get("subagentTaskId") else {}
                     merged = {
                         **last,
                         "traces": merged_traces,
@@ -1750,6 +1831,7 @@ def replay_transcript_to_ui_messages(
                         else last.get("toolEvents"),
                         "activitySegmentId": last.get("activitySegmentId") or segment,
                         **_turn_fields(rec, "activity"),
+                        **sf,
                     }
                     messages[-1] = merged
                 else:
@@ -1763,6 +1845,7 @@ def replay_transcript_to_ui_messages(
                             **({"toolEvents": visible_structured_events} if visible_structured_events else {}),
                             "activitySegmentId": segment,
                             **_turn_fields(rec, "activity"),
+                            **_subagent_fields(rec),
                             "createdAt": _ts_base + idx,
                         },
                     )

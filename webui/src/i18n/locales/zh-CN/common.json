@@ -876,7 +876,8 @@
       },
       "tabs": {
         "files": "文件",
-        "automations": "自动任务"
+        "automations": "自动任务",
+        "agents": "子代理"
       },
       "files": {
         "loading": "正在加载工作区文件...",
@@ -895,6 +896,10 @@
         "openFullscreen": "全屏打开",
         "viewSource": "查看源码",
         "viewPreview": "查看预览"
+      },
+      "agents": {
+        "empty": "此会话中没有子代理活动",
+        "selectAgent": "选择一个子代理以查看其活动"
       }
     },
     "composer": {

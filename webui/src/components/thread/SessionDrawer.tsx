@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import {
+  Bot,
   Code2,
   Copy,
   Download,
@@ -21,15 +22,16 @@ import { Button } from "@/components/ui/button";
 import { ArtifactShareButton } from "@/components/ArtifactShareButton";
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
 import { FileTreeNode } from "@/components/FileTree";
+import { AgentActivityCluster, type SubagentGroup } from "@/components/thread/AgentActivityCluster";
 import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
 import { ApiError, downloadFile, fetchFilePreview, fetchWorkspaceFiles, type ArtifactShareResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { FilePreviewPayload, WorkspaceFileNode } from "@/lib/types";
+import type { CliAppInfo, FilePreviewPayload, McpPresetInfo, WorkspaceFileNode } from "@/lib/types";
 import {
   AutomationRow,
 } from "@/components/thread/SessionInfoPopover";
 
-type Tab = "files" | "automations";
+type Tab = "files" | "automations" | "agents";
 
 interface SessionDrawerProps {
   sessionKey: string;
@@ -39,8 +41,15 @@ interface SessionDrawerProps {
   isClosing?: boolean;
   autoOpenFile?: string;
   autoOpenFileSeq?: number;
+  autoOpenSubagentTaskId?: string;
+  subagentGroups?: SubagentGroup[];
+  isTurnStreaming?: boolean;
+  cliApps?: CliAppInfo[];
+  mcpPresets?: McpPresetInfo[];
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onClose: () => void;
+  onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
   onOpenFileFullscreen: (path: string, share?: ArtifactShareResult | null) => void;
 }
 
@@ -52,8 +61,15 @@ export function SessionDrawer({
   isClosing = false,
   autoOpenFile,
   autoOpenFileSeq,
+  autoOpenSubagentTaskId,
+  subagentGroups = [],
+  isTurnStreaming = false,
+  cliApps = [],
+  mcpPresets = [],
   onResizeStart,
   onClose,
+  onOpenFilePreview,
+  onOpenLink,
   onOpenFileFullscreen,
 }: SessionDrawerProps) {
   const { t } = useTranslation("common");
@@ -64,6 +80,12 @@ export function SessionDrawer({
     const frame = window.requestAnimationFrame(() => setEntered(true));
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (autoOpenSubagentTaskId) {
+      setActiveTab("agents");
+    }
+  }, [autoOpenSubagentTaskId]);
 
   if (!open) return null;
 
@@ -126,6 +148,20 @@ export function SessionDrawer({
             >
               {t("thread.sessionInfo.tabs.files")}
             </button>
+            {subagentGroups.length > 0 && (
+              <button
+                type="button"
+                className={cn(
+                  "py-2.5 mr-6 text-[13px] font-medium transition-colors border-b-2",
+                  activeTab === "agents"
+                    ? "border-foreground text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => setActiveTab("agents")}
+              >
+                {t("thread.sessionInfo.tabs.agents", { defaultValue: "Agents" })}
+              </button>
+            )}
             <button
               type="button"
               className={cn(
@@ -168,6 +204,16 @@ export function SessionDrawer({
                 autoOpenFile={autoOpenFile}
                 autoOpenFileSeq={autoOpenFileSeq}
                 onOpenFileFullscreen={onOpenFileFullscreen}
+              />
+            ) : activeTab === "agents" ? (
+              <AgentsTab
+                subagentGroups={subagentGroups}
+                autoOpenSubagentTaskId={autoOpenSubagentTaskId}
+                isTurnStreaming={isTurnStreaming}
+                cliApps={cliApps}
+                mcpPresets={mcpPresets}
+                onOpenFilePreview={onOpenFilePreview}
+                onOpenLink={onOpenLink}
               />
             ) : (
               <AutomationsTab
@@ -718,6 +764,249 @@ function FilesTab({
             </span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Agents Tab                                                         */
+/* ------------------------------------------------------------------ */
+
+const AGENT_LIST_DEFAULT_WIDTH = 220;
+const AGENT_LIST_MIN_WIDTH = 120;
+
+function AgentsTab({
+  subagentGroups,
+  autoOpenSubagentTaskId,
+  isTurnStreaming,
+  cliApps,
+  mcpPresets,
+  onOpenFilePreview,
+  onOpenLink,
+}: {
+  subagentGroups: SubagentGroup[];
+  autoOpenSubagentTaskId?: string;
+  isTurnStreaming: boolean;
+  cliApps: CliAppInfo[];
+  mcpPresets: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
+}) {
+  const { t } = useTranslation("common");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [listCollapsed, setListCollapsed] = useState(false);
+  const [listWidth, setListWidth] = useState(AGENT_LIST_DEFAULT_WIDTH);
+  const listWidthRef = useRef(AGENT_LIST_DEFAULT_WIDTH);
+  const lastAutoOpenRef = useRef<string | undefined>(undefined);
+
+  // Auto-select on autoOpenSubagentTaskId change
+  useEffect(() => {
+    if (!autoOpenSubagentTaskId || autoOpenSubagentTaskId === lastAutoOpenRef.current) return;
+    lastAutoOpenRef.current = autoOpenSubagentTaskId;
+    setSelectedTaskId(autoOpenSubagentTaskId);
+  }, [autoOpenSubagentTaskId]);
+
+  // Auto-select first subagent if available and nothing selected
+  useEffect(() => {
+    if (subagentGroups.length > 0 && !selectedTaskId) {
+      setSelectedTaskId(subagentGroups[0].taskId);
+    }
+  }, [subagentGroups, selectedTaskId]);
+
+  // Keep listWidthRef in sync
+  useEffect(() => {
+    listWidthRef.current = listWidth;
+  }, [listWidth]);
+
+  const handleListResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const listEl = handle.previousElementSibling as HTMLElement | null;
+    if (!listEl) return;
+    const listRect = listEl.getBoundingClientRect();
+    const leftEdge = listRect.left;
+    const originalBodyCursor = document.body.style.cursor;
+    const originalBodyUserSelect = document.body.style.userSelect;
+    let nextWidth = listWidthRef.current;
+    let frame: number | null = null;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const applyWidth = (clientX: number) => {
+      nextWidth = Math.max(AGENT_LIST_MIN_WIDTH, clientX - leftEdge);
+      listWidthRef.current = nextWidth;
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        setListWidth(nextWidth);
+      });
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyWidth(moveEvent.clientX);
+    };
+    const handlePointerUp = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+      setListWidth(nextWidth);
+      document.body.style.cursor = originalBodyCursor;
+      document.body.style.userSelect = originalBodyUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    applyWidth(event.clientX);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, []);
+
+  const selectedGroup = subagentGroups.find((g) => g.taskId === selectedTaskId) ?? null;
+
+  // Strip subagentTaskId/subagentTitle so the inner AgentActivityCluster renders
+  // activity normally rather than re-grouping as nested subagent activity.
+  const selectedMessages = useMemo(
+    () =>
+      selectedGroup?.messages.map((m) => {
+        if (!m.subagentTaskId && !m.subagentTitle) return m;
+        const { subagentTaskId: _, subagentTitle: __, ...rest } = m;
+        return rest as typeof m;
+      }) ?? [],
+    [selectedGroup],
+  );
+
+  if (subagentGroups.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-[13px] text-muted-foreground">
+        {t("thread.sessionInfo.agents.empty", { defaultValue: "No subagent activity in this session" })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Body */}
+      <div className="flex-1 min-h-0 flex">
+        {/* Subagent list */}
+        <div
+          className={cn(
+            "overflow-y-auto border-r border-border/45 transition-[width] duration-200 ease-out",
+            listCollapsed ? "w-0 border-r-0" : "",
+          )}
+          style={{ width: listCollapsed ? 0 : listWidth }}
+        >
+          <div className="py-1" style={{ minWidth: listWidth }}>
+            {subagentGroups.map((group) => {
+              const toolCount = group.messages.filter((m) => m.kind === "trace").length;
+              const reasoningCount = group.messages.filter(
+                (m) => m.role === "assistant" && m.kind !== "trace" && !m.content.trim(),
+              ).length;
+              const isSelected = group.taskId === selectedTaskId;
+
+              return (
+                <button
+                  key={group.taskId}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTaskId(group.taskId);
+                    if (listCollapsed) setListCollapsed(false);
+                  }}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 transition-colors",
+                    "hover:bg-accent/50",
+                    isSelected && "bg-accent text-accent-foreground",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-3.5 w-3.5 shrink-0 text-violet-500/70" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] font-medium truncate">
+                        {group.title}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground/60 mt-0.5">
+                        {[
+                          reasoningCount ? `${reasoningCount} thoughts` : "",
+                          toolCount ? `${toolCount} calls` : "",
+                        ]
+                          .filter(Boolean)
+                          .join(", ") || `${group.messages.length} events`}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* List resize handle */}
+        {!listCollapsed && (
+          <button
+            type="button"
+            aria-label={t("thread.sessionInfo.files.resizeTree", { defaultValue: "Resize list" })}
+            className={cn(
+              "group relative shrink-0 w-3 -ml-px cursor-col-resize touch-none",
+              "flex items-center justify-center focus-visible:outline-none",
+            )}
+            onPointerDown={handleListResizeStart}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "h-full w-px bg-foreground/25 opacity-0 transition-opacity",
+                "group-hover:opacity-100 group-focus-visible:bg-ring group-focus-visible:opacity-100",
+              )}
+            />
+            <GripVertical
+              aria-hidden
+              className="absolute h-4 w-4 text-muted-foreground/30 opacity-0 transition-opacity group-hover:opacity-100"
+            />
+          </button>
+        )}
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 overflow-y-auto">
+          {selectedGroup ? (
+            <div className="p-3">
+              <div className="flex items-center gap-2 mb-3">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={() => setListCollapsed(!listCollapsed)}
+                  aria-label={listCollapsed ? "Expand list" : "Collapse list"}
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                </Button>
+                <Bot className="h-4 w-4 text-violet-500/70 shrink-0" />
+                <span className="text-[13px] font-medium truncate">
+                  {selectedGroup.title}
+                </span>
+              </div>
+              <AgentActivityCluster
+                messages={selectedMessages}
+                isTurnStreaming={isTurnStreaming}
+                hasBodyBelow={false}
+                cliApps={cliApps}
+                mcpPresets={mcpPresets}
+                onOpenFilePreview={onOpenFilePreview}
+                onOpenLink={onOpenLink}
+              />
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full pt-32">
+              <span className="text-[13px] text-muted-foreground">
+                {t("thread.sessionInfo.agents.selectAgent", { defaultValue: "Select a subagent to view its activity" })}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

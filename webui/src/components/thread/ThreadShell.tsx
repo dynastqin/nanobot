@@ -13,6 +13,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import { groupMessagesBySubagent, type SubagentGroup } from "@/components/thread/AgentActivityCluster";
 import {
   Tooltip,
   TooltipContent,
@@ -56,7 +57,7 @@ import { useClient } from "@/providers/ClientProvider";
 
 type RightPanel =
   | { kind: "closed" }
-  | { kind: "session"; tab: "files" | "automations"; autoOpenFile?: string; autoOpenFileSeq?: number }
+  | { kind: "session"; tab: "files" | "automations" | "agents"; autoOpenFile?: string; autoOpenFileSeq?: number; autoOpenSubagentTaskId?: string }
   | { kind: "preview"; path: string; returnToSession?: boolean }
   | { kind: "link"; url: string };
 
@@ -426,6 +427,11 @@ export function ThreadShell({
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
 
+  const subagentGroups = useMemo<SubagentGroup[]>(
+    () => groupMessagesBySubagent(displayMessages).subagentGroups,
+    [displayMessages],
+  );
+
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const modelBadge = useMemo(
@@ -694,6 +700,15 @@ export function ThreadShell({
     setRightPanel({ kind: "link", url });
   }, []);
 
+  const handleOpenSubagent = useCallback((taskId: string) => {
+    if (panelCloseTimerRef.current !== null) {
+      window.clearTimeout(panelCloseTimerRef.current);
+      panelCloseTimerRef.current = null;
+    }
+    setPanelClosing(false);
+    setRightPanel({ kind: "session", tab: "agents", autoOpenSubagentTaskId: taskId });
+  }, []);
+
   const handlePanelResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -941,6 +956,7 @@ export function ThreadShell({
           onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
           onOpenLink={historyKey ? handleOpenLink : undefined}
           onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+          onOpenSubagent={historyKey ? handleOpenSubagent : undefined}
         />
       </div>
       {rightPanel.kind === "session" && historyKey ? (
@@ -952,8 +968,15 @@ export function ThreadShell({
           isClosing={panelClosing}
           autoOpenFile={rightPanel.autoOpenFile}
           autoOpenFileSeq={rightPanel.autoOpenFileSeq}
+          autoOpenSubagentTaskId={rightPanel.autoOpenSubagentTaskId}
+          subagentGroups={subagentGroups}
+          isTurnStreaming={isStreaming}
+          cliApps={cliApps}
+          mcpPresets={mcpPresets}
           onResizeStart={handlePanelResizeStart}
           onClose={handleCloseRightPanel}
+          onOpenFilePreview={handleOpenFilePreview}
+          onOpenLink={handleOpenLink}
           onOpenFileFullscreen={(path, share) => {
             setFullscreenFilePath(path);
             setFullscreenShare(share ?? null);

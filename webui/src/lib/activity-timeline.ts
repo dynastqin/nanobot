@@ -233,7 +233,10 @@ function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], vis
       && !!runSegmentId
       && !!segmentId
       && runSegmentId !== segmentId;
-    if ((runBucket && bucket !== runBucket) || segmentChanged) {
+    const sameSubagent =
+      !!message.subagentTaskId &&
+      runMessages.some((m) => m.subagentTaskId === message.subagentTaskId);
+    if (((runBucket && bucket !== runBucket) || segmentChanged) && !sameSubagent) {
       flushRun();
     }
     runBucket = bucket;

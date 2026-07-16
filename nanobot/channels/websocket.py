@@ -1088,6 +1088,10 @@ class WebSocketChannel(BaseChannel):
             payload["kind"] = "tool_hint"
         elif msg.metadata.get("_progress"):
             payload["kind"] = "progress"
+        if msg.metadata.get("_subagent_task_id"):
+            payload["_subagent_task_id"] = msg.metadata["_subagent_task_id"]
+        if msg.metadata.get("_subagent_title"):
+            payload["_subagent_title"] = msg.metadata["_subagent_title"]
         phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
         self._transcripts.prepare_and_append(
             msg.chat_id,
@@ -1126,6 +1130,10 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
+        if meta.get("_subagent_task_id"):
+            body["_subagent_task_id"] = meta["_subagent_task_id"]
+        if meta.get("_subagent_title"):
+            body["_subagent_title"] = meta["_subagent_title"]
         self._transcripts.prepare_and_append(
             chat_id,
             body,
@@ -1153,6 +1161,10 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
+        if meta.get("_subagent_task_id"):
+            body["_subagent_task_id"] = meta["_subagent_task_id"]
+        if meta.get("_subagent_title"):
+            body["_subagent_title"] = meta["_subagent_title"]
         self._transcripts.prepare_and_append(
             chat_id,
             body,
@@ -1177,6 +1189,11 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "edits": edits,
         }
+        meta = metadata or {}
+        if meta.get("_subagent_task_id"):
+            payload["_subagent_task_id"] = meta["_subagent_task_id"]
+        if meta.get("_subagent_title"):
+            payload["_subagent_title"] = meta["_subagent_title"]
         self._transcripts.prepare_and_append(
             chat_id,
             payload,

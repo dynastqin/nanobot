@@ -23,6 +23,7 @@ interface ThreadMessagesProps {
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
+  onOpenSubagent?: (taskId: string) => void;
 }
 
 export type DisplayUnit = TurnUnit;
@@ -175,6 +176,7 @@ export function ThreadMessages({
   onOpenFilePreview,
   onOpenLink,
   onForkFromMessage,
+  onOpenSubagent,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
@@ -231,6 +233,7 @@ export function ThreadMessages({
                     mcpPresets={mcpPresets}
                     onOpenFilePreview={onOpenFilePreview}
                     onOpenLink={onOpenLink}
+                    onOpenSubagent={onOpenSubagent}
                   />
                 </MessageRow>
               ) : (

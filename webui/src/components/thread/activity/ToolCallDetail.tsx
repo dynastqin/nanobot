@@ -55,9 +55,15 @@ export function JsonBlock({ value, label }: { value: unknown; label: string }) {
   );
 }
 
+function getToolEventArguments(event: ToolProgressEvent): unknown {
+  const fnArgs = (event as { function?: { arguments?: unknown } }).function?.arguments;
+  return fnArgs ?? event.arguments;
+}
+
 export function hasToolCallDetails(event: ToolProgressEvent): boolean {
-  const hasArgs = event.arguments !== undefined && event.arguments !== null
-    && !(typeof event.arguments === "object" && Object.keys(event.arguments as object).length === 0);
+  const rawArgs = getToolEventArguments(event);
+  const hasArgs = rawArgs !== undefined && rawArgs !== null
+    && !(typeof rawArgs === "object" && Object.keys(rawArgs as object).length === 0);
   const isRunning = event.phase === "start";
   const isError = event.phase === "error";
   const showResult = !isRunning && (event.result !== undefined || isError);
@@ -65,15 +71,16 @@ export function hasToolCallDetails(event: ToolProgressEvent): boolean {
 }
 
 export function ToolCallDetailContent({ event }: { event: ToolProgressEvent }) {
-  const hasArgs = event.arguments !== undefined && event.arguments !== null
-    && !(typeof event.arguments === "object" && Object.keys(event.arguments as object).length === 0);
+  const rawArgs = getToolEventArguments(event);
+  const hasArgs = rawArgs !== undefined && rawArgs !== null
+    && !(typeof rawArgs === "object" && Object.keys(rawArgs as object).length === 0);
   const isRunning = event.phase === "start";
   const isError = event.phase === "error";
   const showResult = !isRunning && (event.result !== undefined || isError);
 
   return (
     <div className="mt-1.5 pl-0.5 border-l-2 border-border/50">
-      {hasArgs && <JsonBlock value={event.arguments} label="Arguments" />}
+      {hasArgs && <JsonBlock value={rawArgs} label="Arguments" />}
       {isRunning && (
         <div className="mt-1 text-[11px] italic text-muted-foreground/50">Running…</div>
       )}

@@ -80,7 +80,7 @@ class SpawnTool(Tool, ContextAware):
         limit = self._manager.max_concurrent_subagents
         if running >= limit:
             return (
-                f"Cannot spawn subagent: concurrency limit reached "
+                f"Error: Cannot spawn subagent: concurrency limit reached "
                 f"({running}/{limit} running). Wait for a running subagent "
                 f"to complete before spawning a new one."
             )

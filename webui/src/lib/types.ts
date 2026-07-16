@@ -74,6 +74,10 @@ export interface UIMessage {
   turnId?: string;
   turnPhase?: UITurnPhase;
   turnSeq?: number;
+  /** 子代理任务 ID，非空表示此消息属于某个子代理 */
+  subagentTaskId?: string;
+  /** 子代理任务标题，用于分组标签展示 */
+  subagentTitle?: string;
 }
 
 export interface UICliAppAttachment {
@@ -827,11 +831,19 @@ export type InboundEvent =
       source?: UIMessageSource;
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
+      /** 子代理任务 ID，由后端 metadata 透传 */
+      _subagent_task_id?: string;
+      /** 子代理任务标题 */
+      _subagent_title?: string;
     } & InboundTurnMetadata)
   | ({
       event: "file_edit";
       chat_id: string;
       edits: UIFileEdit[];
+      /** 子代理任务 ID，由后端 metadata 透传 */
+      _subagent_task_id?: string;
+      /** 子代理任务标题 */
+      _subagent_title?: string;
     } & InboundTurnMetadata)
   | ({
       event: "delta";
@@ -850,11 +862,15 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       stream_id?: string;
+      _subagent_task_id?: string;
+      _subagent_title?: string;
     } & InboundTurnMetadata)
   | ({
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
+      _subagent_task_id?: string;
+      _subagent_title?: string;
     } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";

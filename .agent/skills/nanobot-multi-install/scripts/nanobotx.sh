@@ -224,15 +224,16 @@ cmd_list() {
   if [[ $(reg_read | jq 'length') -eq 0 ]]; then
     echo "(no instances)"; return
   fi
-  printf "%-12s %-30s %-8s %-38s %-8s %s\n" NAME WEBUI API TOKEN PID STATUS
-  reg_read | jq -r '.[] | [.name, (.gateway_port|tostring), (.api_port|tostring), (.token // "-" | tostring), (.pid|tostring)] | @tsv' | \
-  while IFS=$'\t' read -r name gw api token pid; do
+  printf "%-12s %-30s %-38s %-8s %s\n" NAME WEBUI TOKEN PID STATUS
+  reg_read | jq -r '.[] | [.name, (.gateway_port|tostring), (.token // "-" | tostring), (.pid|tostring)] | @tsv' | \
+  while IFS=$'\t' read -r name gw token pid; do
     if [[ "$pid" != "null" ]] && kill -0 "$pid" 2>/dev/null; then
-      status="running"
+      status=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+      [[ -z "$status" ]] && status="running"
     else
       status="stopped"; pid="-"
     fi
-    printf "%-12s %-30s %-8s %-38s %-8s %s\n" "$name" "http://$host:$gw" "$api" "${token:0:36}" "$pid" "$status"
+    printf "%-12s %-30s %-38s %-8s %s\n" "$name" "http://$host:$gw" "${token:0:36}" "$pid" "$status"
   done
 }
 

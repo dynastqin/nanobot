@@ -50,6 +50,7 @@ interface ThreadViewportProps {
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
+  onOpenSubagent?: (taskId: string) => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -125,6 +126,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   onOpenFilePreview,
   onOpenLink,
   onForkFromMessage,
+  onOpenSubagent,
 }, ref) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -526,6 +528,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onOpenFilePreview={onOpenFilePreview}
                   onOpenLink={onOpenLink}
                   onForkFromMessage={onForkFromMessage}
+                  onOpenSubagent={onOpenSubagent}
                 />
               </div>
             </div>

@@ -293,6 +293,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            shared_tools=self.tools,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120

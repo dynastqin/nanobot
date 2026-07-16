@@ -37,8 +37,8 @@ interface ActiveAssistantCursor {
 }
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields }
-  | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; subagentTaskId?: string; subagentTitle?: string }
+  | { kind: "reasoning"; text: string; turn: UIMessageTurnFields; subagentTaskId?: string; subagentTitle?: string };
 
 type UIMessageTurnFields = Pick<UIMessage, "turnId" | "turnPhase" | "turnSeq">;
 
@@ -87,6 +87,15 @@ function findStreamingAssistantIndex(
 }
 
 /**
+ * Check that a candidate message and a subagent id belong to the same
+ * subagent. When neither has an id, both are from the main agent.
+ */
+function subagentMatch(candidate: UIMessage, taskId?: string): boolean {
+  if (!taskId && !candidate.subagentTaskId) return true;
+  return candidate.subagentTaskId === taskId;
+}
+
+/**
  * Append a reasoning chunk to the last open reasoning stream in ``prev``.
  *
  * Lookup rule: reasoning can only extend the current reasoning placeholder.
@@ -101,6 +110,8 @@ function attachReasoningChunk(
     ensure: () => string;
   },
   turn: UIMessageTurnFields = {},
+  subagentTaskId?: string,
+  subagentTitle?: string,
 ): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
@@ -121,10 +132,24 @@ function attachReasoningChunk(
       || candidate.reasoning !== undefined
       || candidate.isStreaming
     ) {
+      // Only merge into a reasoning stream belonging to the same
+      // subagent. Concurrent subagents may interleave reasoning
+      // chunks; matching by subagentTaskId prevents chunks from
+      // one subagent being appended to another's stream.
+      if (subagentTaskId && candidate.subagentTaskId && candidate.subagentTaskId !== subagentTaskId) {
+        continue;
+      }
+      if (subagentTaskId && !candidate.subagentTaskId) {
+        continue;
+      }
+      if (!subagentTaskId && candidate.subagentTaskId) {
+        continue;
+      }
       const merged: UIMessage = {
         ...candidate,
         reasoning: (candidate.reasoning ?? "") + chunk,
         reasoningStreaming: true,
+        ...(subagentTaskId && !candidate.subagentTaskId ? { subagentTaskId, subagentTitle } : {}),
         ...(activitySegmentId ? { activitySegmentId } : {}),
         ...turn,
       };
@@ -142,6 +167,7 @@ function attachReasoningChunk(
       isStreaming: true,
       reasoning: chunk,
       reasoningStreaming: true,
+      ...(subagentTaskId ? { subagentTaskId, subagentTitle } : {}),
       ...(activitySegmentId ? { activitySegmentId } : {}),
       ...turn,
       createdAt: Date.now(),
@@ -180,10 +206,21 @@ function replaceMessageAt(prev: UIMessage[], index: number, message: UIMessage):
  * Close the active reasoning stream segment, if any. Idempotent: a
  * ``reasoning_end`` with no preceding deltas is a harmless no-op.
  */
-function closeReasoningStream(prev: UIMessage[]): UIMessage[] {
+function closeReasoningStream(prev: UIMessage[], subagentTaskId?: string): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
     if (!candidate.reasoningStreaming) continue;
+    // Only close reasoning streams belonging to the same subagent so
+    // concurrent subagents don't prematurely terminate each other's reasoning.
+    if (subagentTaskId && candidate.subagentTaskId && candidate.subagentTaskId !== subagentTaskId) {
+      continue;
+    }
+    if (subagentTaskId && !candidate.subagentTaskId) {
+      continue;
+    }
+    if (!subagentTaskId && candidate.subagentTaskId) {
+      continue;
+    }
     const latencyMs =
       candidate.latencyMs === undefined
       && Number.isFinite(candidate.createdAt)
@@ -211,18 +248,33 @@ function isReasoningOnlyPlaceholder(message: UIMessage): boolean {
   );
 }
 
-function isToolTrace(message: UIMessage | undefined): boolean {
-  return message?.kind === "trace";
+/**
+ * Check whether a tool trace belonging to the same owner (same subagent
+ * or both main-agent) follows at or after ``startIndex``, skipping over
+ * interleaved subagent messages.
+ */
+function hasToolTraceForOwner(prev: UIMessage[], startIndex: number, taskId?: string): boolean {
+  for (let j = startIndex; j < prev.length; j++) {
+    const m = prev[j];
+    const candId = m.subagentTaskId;
+    if (taskId && candId && taskId !== candId) continue;
+    if (taskId && !candId) continue;
+    if (!taskId && candId) continue;
+    return m.kind === "trace";
+  }
+  return false;
 }
 
 function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
   return prev.filter((message, index) => {
     if (!isReasoningOnlyPlaceholder(message)) return true;
-    // A reasoning-only assistant row immediately followed by tool traces is
-    // the live equivalent of a persisted assistant tool-call message with
-    // empty content, reasoning_content, and tool_calls. Keep it so live render
-    // and history replay stay isomorphic.
-    return isToolTrace(prev[index + 1]);
+    // A reasoning-only assistant row followed by tool traces from the
+    // same owner is the live equivalent of a persisted assistant
+    // tool-call message with empty content, reasoning_content, and
+    // tool_calls. Keep it so live render and history replay stay
+    // isomorphic. Skip interleaved subagent messages to avoid false
+    // negatives when events arrive out of order.
+    return hasToolTraceForOwner(prev, index + 1, message.subagentTaskId);
   });
 }
 
@@ -385,12 +437,14 @@ function findFileEditTraceIndex(
   prev: UIMessage[],
   segmentId: string | null,
   incoming: UIFileEdit[],
+  subagentTaskId?: string,
 ): number | null {
   const incomingKeys = new Set(incoming.map(fileEditKey));
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
     if (candidate.role === "user") break;
     if (candidate.kind !== "trace") continue;
+    if (!subagentMatch(candidate, subagentTaskId)) continue;
     if (segmentId && candidate.activitySegmentId === segmentId) return i;
     for (const existing of candidate.fileEdits ?? []) {
       if (incomingKeys.has(fileEditKey(existing))) return i;
@@ -619,6 +673,8 @@ export function useNanobotStream(
             event.text,
             { ensure: ensureActivitySegmentId },
             event.turn,
+            event.subagentTaskId,
+            event.subagentTitle,
           );
         }
       }
@@ -773,6 +829,8 @@ export function useNanobotStream(
           kind: "reasoning",
           text: chunk,
           turn: turnFieldsFromEvent(ev, "reasoning"),
+          subagentTaskId: ev._subagent_task_id,
+          subagentTitle: ev._subagent_title,
         });
         schedulePendingStreamFlush();
         return;
@@ -801,7 +859,7 @@ export function useNanobotStream(
 
       if (ev.event === "reasoning_end") {
         if (suppressStreamUntilTurnEndRef.current) return;
-        setMessages((prev) => closeReasoningStream(prev));
+        setMessages((prev) => closeReasoningStream(prev, ev._subagent_task_id));
         return;
       }
 
@@ -887,12 +945,16 @@ export function useNanobotStream(
           const line = ev.text;
           if (!line) return;
           if (fileEditSegmentRef.current) clearActivitySegment();
+          const subagentTaskId = ev._subagent_task_id;
+          const subagentTitle = ev._subagent_title;
           setMessages((prev) => closeReasoningStream(attachReasoningChunk(
             prev,
             line,
             { ensure: ensureActivitySegmentId },
             turnFieldsFromEvent(ev, "reasoning"),
-          )));
+            subagentTaskId,
+            subagentTitle,
+          ), subagentTaskId));
           return;
         }
         // Intermediate agent breadcrumbs (tool-call hints, raw progress).
@@ -901,6 +963,8 @@ export function useNanobotStream(
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
           const structuredEvents = normalizeToolProgressEvents(ev.tool_events);
           const turn = turnFieldsFromEvent(ev, "activity");
+          const subagentTaskId = ev._subagent_task_id;
+          const subagentTitle = ev._subagent_title;
           setMessages((prev) => {
             const segmentId = ensureActivitySegmentId();
             const base = prev;
@@ -920,6 +984,7 @@ export function useNanobotStream(
               && last.kind === "trace"
               && !last.isStreaming
               && (!last.activitySegmentId || last.activitySegmentId === segmentId)
+              && subagentMatch(last, subagentTaskId)
             ) {
               const previousTraces = last.traces?.length
                 ? last.traces
@@ -940,6 +1005,7 @@ export function useNanobotStream(
                   : last.toolEvents,
                 activitySegmentId: last.activitySegmentId ?? segmentId,
                 ...turn,
+                ...(subagentTaskId && !last.subagentTaskId ? { subagentTaskId, subagentTitle } : {}),
               };
               return [...base.slice(0, -1), merged];
             }
@@ -954,6 +1020,7 @@ export function useNanobotStream(
                 ...(visibleStructuredEvents.length ? { toolEvents: visibleStructuredEvents } : {}),
                 activitySegmentId: segmentId,
                 ...turn,
+                ...(subagentTaskId ? { subagentTaskId, subagentTitle } : {}),
                 createdAt: Date.now(),
               },
             ];
@@ -1000,6 +1067,8 @@ export function useNanobotStream(
         const normalized = mergeFileEdits(undefined, edits);
         if (normalized.length === 0) return;
         const turn = turnFieldsFromEvent(ev, "activity");
+        const subagentTaskId = ev._subagent_task_id;
+        const subagentTitle = ev._subagent_title;
         const opensFileEditPhase = normalized.some(
           (edit) => edit.status === "editing" || edit.phase === "start",
         );
@@ -1011,7 +1080,7 @@ export function useNanobotStream(
         setMessages((prev) => {
           let segmentId = eventSegmentId;
           const base = prev;
-          const targetIndex = findFileEditTraceIndex(base, segmentId, normalized);
+          const targetIndex = findFileEditTraceIndex(base, segmentId, normalized, subagentTaskId);
           if (targetIndex !== null) {
             const target = base[targetIndex];
             segmentId = target.activitySegmentId ?? segmentId ?? detachedActivitySegmentId();
@@ -1022,6 +1091,7 @@ export function useNanobotStream(
               fileEdits: mergeFileEdits(cleanedTarget.fileEdits, normalized),
               activitySegmentId: segmentId,
               ...turn,
+              ...(subagentTaskId && !target.subagentTaskId ? { subagentTaskId, subagentTitle } : {}),
             };
             return replaceMessageAt(base, targetIndex, merged);
           }
@@ -1038,6 +1108,7 @@ export function useNanobotStream(
               fileEdits: normalized,
               activitySegmentId: segmentId,
               ...turn,
+              ...(subagentTaskId ? { subagentTaskId, subagentTitle } : {}),
               createdAt: Date.now(),
             },
           ];

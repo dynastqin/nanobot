@@ -876,7 +876,8 @@
       },
       "tabs": {
         "files": "Files",
-        "automations": "Automations"
+        "automations": "Automations",
+        "agents": "Agents"
       },
       "files": {
         "loading": "Loading workspace files...",
@@ -895,6 +896,10 @@
         "openFullscreen": "Open in fullscreen",
         "viewSource": "View source",
         "viewPreview": "View preview"
+      },
+      "agents": {
+        "empty": "No subagent activity in this session",
+        "selectAgent": "Select a subagent to view its activity"
       }
     },
     "composer": {

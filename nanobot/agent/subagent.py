@@ -10,13 +10,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
+from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
@@ -87,6 +88,7 @@ class SubagentManager:
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        shared_tools: ToolRegistry | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -109,6 +111,7 @@ class SubagentManager:
         )
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
+        self._shared_tools = shared_tools
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -141,6 +144,17 @@ class SubagentManager:
             ),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
+
+        # Share MCP tools from the main agent so subagents reuse the same
+        # sessions (e.g. Playwright browser instance) instead of spawning
+        # conflicting independent connections.
+        if self._shared_tools:
+            for name in self._shared_tools.tool_names:
+                if name.startswith("mcp_"):
+                    tool = self._shared_tools.get(name)
+                    if tool is not None:
+                        registry.register(tool)
+
         return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
@@ -240,6 +254,41 @@ class SubagentManager:
             )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
+                # Build a progress callback that publishes subagent tool events
+                # to the message bus so the WebUI can render them inline.
+                async def _subagent_progress(
+                    content: str,
+                    *,
+                    tool_hint: bool = False,
+                    tool_events: list[dict[str, Any]] | None = None,
+                    file_edit_events: list[dict[str, Any]] | None = None,
+                    reasoning: bool = False,
+                    reasoning_end: bool = False,
+                ) -> None:
+                    meta: dict[str, Any] = {}
+                    meta["_progress"] = True
+                    meta["_tool_hint"] = tool_hint
+                    meta["_subagent_task_id"] = task_id
+                    meta["_subagent_title"] = label
+                    if reasoning:
+                        meta["_reasoning_delta"] = True
+                    if reasoning_end:
+                        meta["_reasoning_end"] = True
+                    if tool_events:
+                        meta["_tool_events"] = tool_events
+                    if file_edit_events:
+                        meta["_file_edit_events"] = file_edit_events
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=origin["channel"],
+                        chat_id=origin["chat_id"],
+                        content=content,
+                        metadata=meta,
+                    ))
+
+                progress_hook = AgentProgressHook(on_progress=_subagent_progress)
+                subagent_hook = _SubagentHook(task_id, status)
+                hook = CompositeHook([progress_hook, subagent_hook])
+
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
@@ -247,7 +296,8 @@ class SubagentManager:
                     temperature=temperature,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
-                    hook=_SubagentHook(task_id, status),
+                    hook=hook,
+                    progress_callback=_subagent_progress,
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,
                     error_message=None,
