@@ -243,7 +243,7 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
             default=False,
         ),
         disk=StringSchema(
-            "workspace",
+            default="workspace",
             description='Which disk to read from: "workspace" (default) or "cloud" (CloudDisk)',
             enum=["workspace", "cloud"],
         ),
@@ -485,7 +485,7 @@ class ReadFileTool(_FsTool):
         path=StringSchema("The file path to write to"),
         content=StringSchema("The content to write"),
         disk=StringSchema(
-            "workspace",
+            default="workspace",
             description='Which disk to write to: "workspace" (default) or "cloud" (CloudDisk)',
             enum=["workspace", "cloud"],
         ),
@@ -816,7 +816,7 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
             nullable=True,
         ),
         disk=StringSchema(
-            "workspace",
+            default="workspace",
             description='Which disk to edit: "workspace" (default) or "cloud" (CloudDisk)',
             enum=["workspace", "cloud"],
         ),
@@ -1048,7 +1048,7 @@ class EditFileTool(_FsTool):
             minimum=1,
         ),
         disk=StringSchema(
-            "workspace",
+            default="workspace",
             description='Which disk to list: "workspace" (default) or "cloud" (CloudDisk)',
             enum=["workspace", "cloud"],
         ),

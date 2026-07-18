@@ -857,16 +857,13 @@ class GatewayHTTPHandler:
             ],
         )
 
-    async def _handle_clouddisk_upload(self, request: WsRequest) -> Response:
+    def _handle_clouddisk_upload(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         q = _parse_query(request.path)
         folder = _query_first(q, "folder") or ""
         filename = _query_first(q, "filename") or "uploaded_file"
-        try:
-            body = await request.body
-        except Exception:
-            body = b""
+        body = getattr(request, "_body", None)
         if not body:
             return _http_error(400, "empty body")
         try:

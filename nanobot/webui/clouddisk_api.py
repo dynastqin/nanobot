@@ -11,12 +11,79 @@ import mimetypes
 import os
 import shutil
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from nanobot.config.paths import ensure_clouddisk_dirs
 from nanobot.utils.helpers import ensure_dir
+
+# ---------------------------------------------------------------------------
+# Monkey-patch websockets to support HTTP request bodies
+# ---------------------------------------------------------------------------
+
+
+def _patch_websockets_request_body() -> None:
+    """Patch websockets.http11.Request.parse to read request bodies.
+
+    websockets 16.x rejects any HTTP request with Content-Length > 0 **and**
+    any non-GET method in ``Request.parse()``, which prevents POST/PUT
+    endpoints from working.  This patch intercepts the parse to:
+
+    * rewrite POST / PUT → GET on the request line,
+    * capture the real Content-Length while presenting a zero
+      Content-Length to the original parser, and
+    * consume the body from the stream, storing it as ``_body`` on the
+      Request object.
+    """
+    try:
+        import websockets.http11
+    except ImportError:
+        return
+
+    _original_parse = websockets.http11.Request.parse.__func__
+
+    @classmethod
+    def _patched_parse(cls, read_line):
+        captured_content_length = 0
+        _real_read_line = read_line
+
+        def _wrapped_read_line(m):
+            nonlocal captured_content_length
+            line = yield from _real_read_line(m)
+            line_str = line.decode("ascii", errors="ignore")
+            if line_str.lower().startswith("content-length:"):
+                try:
+                    captured_content_length = int(line_str.split(":", 1)[1].strip())
+                except (ValueError, IndexError):
+                    pass
+                return b"Content-Length: 0\r\n"
+            # Rewrite POST / PUT → GET so the original parser's method
+            # guard (method != b"GET") doesn't reject the request.
+            if (
+                line_str.startswith("POST ")
+                or line_str.startswith("PUT ")
+            ):
+                return b"GET" + line[line.index(b" "):]
+            return line
+
+        request = yield from _original_parse(cls, _wrapped_read_line)
+
+        body = b""
+        if captured_content_length > 0:
+            try:
+                reader = _real_read_line.__self__
+                raw = yield from reader.read_exact(captured_content_length)
+                body = bytes(raw)
+            except Exception:
+                body = b""
+        object.__setattr__(request, "_body", body)
+        return request
+
+    websockets.http11.Request.parse = _patched_parse  # type: ignore[assignment]
+
+
+_patch_websockets_request_body()
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +311,7 @@ class CloudDiskOps:
         ensure_dir(dst.parent)
         shutil.move(str(src), str(dst))
 
-        from_rel = str(src.relative_to(self.root)) if src.exists() else from_path.lstrip("/")
-        # After shutil.move, src no longer exists, so compute from_rel from the original
+        # After shutil.move, src no longer exists, so compute from_rel from the original path
         from_rel_clean = from_path.lstrip("/")
         to_rel = str(dst.relative_to(self.root))
         self.index.move(from_rel_clean, to_rel, dst.name)

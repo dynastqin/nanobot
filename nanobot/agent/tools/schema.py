@@ -28,12 +28,14 @@ class StringSchema(Schema):
         max_length: int | None = None,
         enum: tuple[Any, ...] | list[Any] | None = None,
         nullable: bool = False,
+        default: str | None = None,
     ) -> None:
         self._description = description
         self._min_length = min_length
         self._max_length = max_length
         self._enum = tuple(enum) if enum is not None else None
         self._nullable = nullable
+        self._default = default
 
     def to_json_schema(self) -> dict[str, Any]:
         t: Any = "string"
@@ -48,6 +50,8 @@ class StringSchema(Schema):
             d["maxLength"] = self._max_length
         if self._enum is not None:
             d["enum"] = list(self._enum)
+        if self._default is not None:
+            d["default"] = self._default
         return d
 
 
