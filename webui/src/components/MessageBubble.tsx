@@ -703,6 +703,7 @@ export function ReasoningBubble({
             onOpenFilePreview={onOpenFilePreview}
             onOpenLink={onOpenLink}
             createdAt={createdAt}
+            disableArtifactCard
             className={cn(
               "text-[12.5px] italic text-muted-foreground/88",
               "prose-p:my-1.5 prose-li:my-0.5",

@@ -354,6 +354,9 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
         def get_running_count(self) -> int:
             return 0
 
+        def find_running_by_label(self, session_key: str, label: str):
+            return None
+
         async def spawn(self, **kwargs):
             self.seen = kwargs
             return "spawned"

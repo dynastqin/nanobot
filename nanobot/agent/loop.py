@@ -792,6 +792,24 @@ class AgentLoop:
                 except asyncio.QueueEmpty:
                     break
 
+            # If we drained some results but sub-agents are still running,
+            # wait briefly (500ms) to batch more completions into a single
+            # injection cycle instead of spreading them across multiple turns.
+            if (items
+                    and len(items) < limit
+                    and session is not None
+                    and self.subagents.get_running_count_by_session(session.key) > 0):
+                try:
+                    msg = await asyncio.wait_for(pending_queue.get(), timeout=0.5)
+                    items.append(_to_user_message(msg))
+                    while len(items) < limit:
+                        try:
+                            items.append(_to_user_message(pending_queue.get_nowait()))
+                        except asyncio.QueueEmpty:
+                            break
+                except asyncio.TimeoutError:
+                    pass  # No more results within the window, proceed with what we have
+
             # Block if nothing drained but sub-agents spawned in this dispatch
             # are still running.  Keeps the runner loop alive so subsequent
             # completions are injected in-order rather than dispatched separately.

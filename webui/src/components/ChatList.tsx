@@ -248,6 +248,21 @@ export const ChatList = memo(function ChatList({
     return () => window.clearTimeout(timer);
   }, [deletingKey, closeDeleteConfirm]);
 
+  useEffect(() => {
+    if (!deletingKey) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeDeleteConfirm();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        handleDelete();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [deletingKey, handleDelete, closeDeleteConfirm]);
+
   if (loading && sessions.length === 0) {
     return (
       <div className="px-3 py-6 text-[12px] text-muted-foreground">

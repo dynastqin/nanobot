@@ -30,7 +30,7 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) -> list[str]:
     """Return model-visible runtime annotations for turn-attached capabilities."""
-    return [
+    lines: list[str] = [
         *cli_app_utils.runtime_lines(msg, workspace, skip=skip),
         *mcp_tools.runtime_lines(
             msg,
@@ -39,6 +39,19 @@ def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) 
             skip=skip,
         ),
     ]
+    if not skip:
+        subagents = getattr(state, "subagents", None)
+        if subagents is not None:
+            session_key = getattr(msg, "session_key", None)
+            if session_key:
+                count = subagents.get_running_count_by_session(session_key)
+                if count > 0:
+                    lines.append(
+                        f"You have {count} subagent(s) still running. "
+                        "Wait for their results before spawning duplicates. "
+                        "Use list_subagents to check their status."
+                    )
+    return lines
 
 
 async def connect_mcp(state: Any, tools: ToolRegistry) -> None:

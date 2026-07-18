@@ -466,7 +466,7 @@ class SubagentManager:
 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
-        return len(self._running_tasks)
+        return sum(1 for t in self._running_tasks.values() if not t.done())
 
     def get_running_count_by_session(self, session_key: str) -> int:
         """Return the number of currently running subagents for a session."""
@@ -475,3 +475,23 @@ class SubagentManager:
             1 for tid in tids
             if tid in self._running_tasks and not self._running_tasks[tid].done()
         )
+
+    def find_running_by_label(self, session_key: str, label: str) -> SubagentStatus | None:
+        """Return a running subagent with the given label in the session, or None."""
+        tids = self._session_tasks.get(session_key, set())
+        for tid in tids:
+            if tid in self._task_statuses and tid in self._running_tasks:
+                if not self._running_tasks[tid].done():
+                    status = self._task_statuses[tid]
+                    if status.label == label:
+                        return status
+        return None
+
+    def list_running(self, session_key: str | None = None) -> list[SubagentStatus]:
+        """List running subagents, optionally filtered by session."""
+        result = []
+        for tid, status in self._task_statuses.items():
+            if tid in self._running_tasks and not self._running_tasks[tid].done():
+                if session_key is None or tid in self._session_tasks.get(session_key, set()):
+                    result.append(status)
+        return result

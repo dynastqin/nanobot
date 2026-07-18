@@ -310,6 +310,9 @@ class TestEphemeralDirect:
             patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_sub.return_value.get_running_count_by_session = MagicMock(return_value=0)
+            mock_sub.return_value.find_running_by_label = MagicMock(return_value=None)
+            mock_sub.return_value.get_running_count = MagicMock(return_value=0)
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
@@ -495,6 +498,9 @@ class TestEphemeralHooks:
             patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_sub.return_value.get_running_count_by_session = MagicMock(return_value=0)
+            mock_sub.return_value.find_running_by_label = MagicMock(return_value=None)
+            mock_sub.return_value.get_running_count = MagicMock(return_value=0)
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,

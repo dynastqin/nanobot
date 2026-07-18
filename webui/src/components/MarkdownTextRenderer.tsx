@@ -37,6 +37,7 @@ interface MarkdownTextRendererProps {
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
   createdAt?: number;
+  disableArtifactCard?: boolean;
 }
 
 type MarkdownAstNode = {
@@ -396,6 +397,7 @@ export default function MarkdownTextRenderer({
   onOpenFilePreview,
   onOpenLink,
   createdAt,
+  disableArtifactCard,
 }: MarkdownTextRendererProps) {
   const components = useMemo<Components>(
     () => ({
@@ -413,7 +415,7 @@ export default function MarkdownTextRenderer({
           );
         }
         const raw = String(kids).replace(/\n$/, "");
-        if (isLikelyFilePath(raw)) {
+        if (!disableArtifactCard && isLikelyFilePath(raw)) {
           return <ArtifactCard path={raw} createdAt={createdAt} onOpen={onOpenFilePreview} />;
         }
         /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
@@ -476,7 +478,7 @@ export default function MarkdownTextRenderer({
       },
       a({ href, children: markdownChildren, ...props }) {
         const filePath = fileReferenceFromLink(href);
-        if (filePath) {
+        if (!disableArtifactCard && filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
             <ArtifactCard

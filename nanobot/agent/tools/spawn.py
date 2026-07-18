@@ -78,6 +78,20 @@ class SpawnTool(Tool, ContextAware):
         """Spawn a subagent to execute the given task."""
         running = self._manager.get_running_count()
         limit = self._manager.max_concurrent_subagents
+
+        # Check for duplicate label before checking concurrency limit,
+        # so the agent gets a clear message instead of a misleading
+        # "concurrency limit reached" error.
+        session_key = self._session_key.get()
+        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        existing = self._manager.find_running_by_label(session_key, display_label)
+        if existing is not None:
+            return (
+                f"Subagent [{display_label}] is already running (id: {existing.task_id}, "
+                f"phase: {existing.phase}). Wait for it to complete before spawning "
+                f"a duplicate."
+            )
+
         if running >= limit:
             return (
                 f"Error: Cannot spawn subagent: concurrency limit reached "
@@ -89,7 +103,7 @@ class SpawnTool(Tool, ContextAware):
             label=label,
             origin_channel=self._origin_channel.get(),
             origin_chat_id=self._origin_chat_id.get(),
-            session_key=self._session_key.get(),
+            session_key=session_key,
             origin_message_id=self._origin_message_id.get(),
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
