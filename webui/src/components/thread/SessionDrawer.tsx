@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { ArtifactShareButton } from "@/components/ArtifactShareButton";
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
 import { FileTreeNode } from "@/components/FileTree";
-import { AgentActivityCluster, type SubagentGroup } from "@/components/thread/AgentActivityCluster";
+import { AgentActivityCluster, formatActivityDuration, type SubagentGroup } from "@/components/thread/AgentActivityCluster";
 import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
 import { ApiError, downloadFile, fetchFilePreview, fetchWorkspaceFiles, type ArtifactShareResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,7 @@ interface SessionDrawerProps {
   autoOpenFileSeq?: number;
   autoOpenSubagentTaskId?: string;
   subagentGroups?: SubagentGroup[];
+  subagentStatuses?: Map<string, string>;
   isTurnStreaming?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -63,6 +64,7 @@ export function SessionDrawer({
   autoOpenFileSeq,
   autoOpenSubagentTaskId,
   subagentGroups = [],
+  subagentStatuses,
   isTurnStreaming = false,
   cliApps = [],
   mcpPresets = [],
@@ -208,6 +210,7 @@ export function SessionDrawer({
             ) : activeTab === "agents" ? (
               <AgentsTab
                 subagentGroups={subagentGroups}
+                subagentStatuses={subagentStatuses}
                 autoOpenSubagentTaskId={autoOpenSubagentTaskId}
                 isTurnStreaming={isTurnStreaming}
                 cliApps={cliApps}
@@ -778,6 +781,7 @@ const AGENT_LIST_MIN_WIDTH = 120;
 
 function AgentsTab({
   subagentGroups,
+  subagentStatuses,
   autoOpenSubagentTaskId,
   isTurnStreaming,
   cliApps,
@@ -786,6 +790,7 @@ function AgentsTab({
   onOpenLink,
 }: {
   subagentGroups: SubagentGroup[];
+  subagentStatuses?: Map<string, string>;
   autoOpenSubagentTaskId?: string;
   isTurnStreaming: boolean;
   cliApps: CliAppInfo[];
@@ -908,6 +913,19 @@ function AgentsTab({
                 (m) => m.role === "assistant" && m.kind !== "trace" && !m.content.trim(),
               ).length;
               const isSelected = group.taskId === selectedTaskId;
+              const status = subagentStatuses?.get(group.taskId) ?? "running";
+              const iconColor =
+                status === "completed"
+                  ? "text-emerald-500/70"
+                  : status === "pending"
+                    ? "text-slate-400/50"
+                    : "text-violet-500/70";
+              const titleColor =
+                status === "completed"
+                  ? "text-emerald-700/80 dark:text-emerald-300/80"
+                  : status === "pending"
+                    ? "text-slate-500/70 dark:text-slate-400/60"
+                    : "text-violet-700/80 dark:text-violet-300/80";
 
               return (
                 <button
@@ -924,18 +942,32 @@ function AgentsTab({
                   )}
                 >
                   <div className="flex items-center gap-2">
-                    <Bot className="h-3.5 w-3.5 shrink-0 text-violet-500/70" />
+                    <Bot className={cn("h-3.5 w-3.5 shrink-0", iconColor)} />
                     <div className="min-w-0 flex-1">
-                      <div className="text-[12.5px] font-medium truncate">
-                        {group.title}
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={cn(
+                            "text-[12.5px] font-medium truncate",
+                            !isSelected && titleColor,
+                          )}
+                        >
+                          {group.title}
+                        </span>
+                        {group.latencyMs != null && (
+                          <span className="text-[10px] text-muted-foreground/45 shrink-0">
+                            {formatActivityDuration(group.latencyMs)}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-muted-foreground/60 mt-0.5">
-                        {[
-                          reasoningCount ? `${reasoningCount} thoughts` : "",
-                          toolCount ? `${toolCount} calls` : "",
-                        ]
-                          .filter(Boolean)
-                          .join(", ") || `${group.messages.length} events`}
+                        {status === "pending"
+                          ? "Starting..."
+                          : [
+                              reasoningCount ? `${reasoningCount} thoughts` : "",
+                              toolCount ? `${toolCount} calls` : "",
+                            ]
+                              .filter(Boolean)
+                              .join(", ") || `${group.messages.length} events`}
                       </div>
                     </div>
                   </div>
@@ -984,7 +1016,16 @@ function AgentsTab({
                 >
                   <PanelRight className="h-3.5 w-3.5" />
                 </Button>
-                <Bot className="h-4 w-4 text-violet-500/70 shrink-0" />
+                <Bot
+                  className={cn(
+                    "h-4 w-4 shrink-0",
+                    (subagentStatuses?.get(selectedGroup.taskId) ?? "running") === "completed"
+                      ? "text-emerald-500/70"
+                      : (subagentStatuses?.get(selectedGroup.taskId) ?? "running") === "pending"
+                        ? "text-slate-400/50"
+                        : "text-violet-500/70",
+                  )}
+                />
                 <span className="text-[13px] font-medium truncate">
                   {selectedGroup.title}
                 </span>

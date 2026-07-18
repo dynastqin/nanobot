@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 from pathlib import Path
@@ -14,6 +15,8 @@ MAX_ENTRIES = 10_000
 MAX_FILE_PREVIEW_BYTES = 384 * 1024
 
 _GFM_TABLE_DELIMITER_RE = re.compile(r"^((?:\|[ \t]*[-:]+[ \t]*)+\|)\s*$", re.MULTILINE)
+
+_IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"})
 
 
 def webui_skills_payload(
@@ -203,6 +206,19 @@ def _language_for_path(path: Path) -> str:
     }.get(ext, ext or "text")
 
 
+def _image_mime_type(ext: str) -> str:
+    return {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "svg": "image/svg+xml",
+        "webp": "image/webp",
+        "bmp": "image/bmp",
+        "ico": "image/x-icon",
+    }.get(ext, "application/octet-stream")
+
+
 def webui_skill_file_preview(
     workspace_path: Path,
     name: str,
@@ -240,6 +256,26 @@ def webui_skill_file_preview(
             raw = f.read(MAX_FILE_PREVIEW_BYTES + 1)
     except OSError:
         return None
+
+    ext = resolved.suffix.lower().lstrip(".")
+    if ext in _IMAGE_EXTENSIONS:
+        truncated = len(raw) > MAX_FILE_PREVIEW_BYTES
+        preview_bytes = raw[:MAX_FILE_PREVIEW_BYTES]
+        b64 = base64.b64encode(preview_bytes).decode("ascii")
+        mime_type = _image_mime_type(ext)
+        content = f"data:{mime_type};base64,{b64}"
+        try:
+            display_path = str(resolved.relative_to(skill_dir))
+        except ValueError:
+            display_path = resolved.name
+        return {
+            "path": str(resolved),
+            "display_path": display_path,
+            "language": "image",
+            "content": content,
+            "size": file_size,
+            "truncated": truncated,
+        }
 
     if b"\0" in raw[:4096]:
         return None

@@ -1047,6 +1047,25 @@ class WebSocketChannel(BaseChannel):
                     scope=scope if isinstance(scope, str) else None,
                 )
             return
+        if msg.metadata.get("_subagent_end"):
+            body: dict[str, Any] = {
+                "event": "subagent_end",
+                "chat_id": msg.chat_id,
+            }
+            lat = msg.metadata.get("latency_ms")
+            if isinstance(lat, (int, float)):
+                body["latency_ms"] = int(lat)
+            task_id = msg.metadata.get("_subagent_task_id")
+            if task_id:
+                body["_subagent_task_id"] = task_id
+            self._transcripts.prepare_and_append(
+                msg.chat_id, body, metadata=msg.metadata, phase="complete",
+            )
+            raw = json.dumps(body, ensure_ascii=False)
+            if conns:
+                for connection in conns:
+                    await self._safe_send_to(connection, raw, label=" subagent_end ")
+            return
         if msg.metadata.get("_file_edit_events"):
             edits = msg.metadata.get("_file_edit_events")
             await self.send_file_edit_events(

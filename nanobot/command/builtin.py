@@ -210,12 +210,6 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    snapshot = session.messages[session.last_consolidated:]
-    session.clear()
-    loop.sessions.save(session)
-    loop.sessions.invalidate(session.key)
-    if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
 
     tz_name = loop.context.timezone or "UTC"
     try:
@@ -223,6 +217,16 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     except Exception:
         tz = ZoneInfo("UTC")
     now = datetime.now(tz).strftime("%Y/%m/%d %H:%M:%S %Z")
+
+    snapshot = session.messages[session.last_consolidated:]
+    session.add_message("system", f" New session · {now} ", _command=True)
+    session.last_consolidated = len(session.messages)
+    session.updated_at = datetime.now()
+    session.metadata.pop("_last_summary", None)
+    loop.sessions.save(session)
+    loop.sessions.invalidate(session.key)
+    if snapshot:
+        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
 
     icon = loop.bot_icon or ""
     name = loop.bot_name or "nanobot"

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 export type ViewMode = "source" | "preview";
 
-const RENDERABLE_LANGUAGES = new Set(["markdown", "html"]);
+const RENDERABLE_LANGUAGES = new Set(["markdown", "html", "image"]);
 
 export function isRenderableFile(language: string): boolean {
   return RENDERABLE_LANGUAGES.has(language.toLowerCase());
@@ -50,6 +50,18 @@ export function FilePreviewContent({
     return (
       <div className={cn("overflow-auto", className)}>
         <MarkdownPreview content={content} />
+      </div>
+    );
+  }
+
+  if (normalizedLang === "image") {
+    return (
+      <div className={cn("flex items-center justify-center p-4", className)}>
+        <img
+          src={content}
+          alt="preview"
+          className="max-h-full max-w-full object-contain"
+        />
       </div>
     );
   }

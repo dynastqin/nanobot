@@ -772,6 +772,188 @@ def append_fork_marker(session_key: str) -> None:
     )
 
 
+def _chat_id_from_any_session_key(session_key: str) -> str | None:
+    """Extract chat_id from any session key format, not just websocket."""
+    parts = session_key.split(":", 1)
+    if len(parts) == 2 and parts[1].strip():
+        return parts[1].strip()
+    return None
+
+
+_INTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
+    "complete_goal",
+})
+
+_TOOL_RESULT_MAX_CHARS = 2000
+
+
+def _is_internal_tool_name(name: str) -> bool:
+    """Filter out tool calls that are internal bookkeeping and shouldn't appear in the UI."""
+    return name in _INTERNAL_TOOL_NAMES
+
+
+def _extract_skill_load(name: str, args_str: str) -> dict[str, str] | None:
+    """Extract skill_load metadata from a tool call, matching progress_hook behavior."""
+    if name == "read_skill":
+        try:
+            args = json.loads(args_str) if args_str.strip() else {}
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if isinstance(args, dict):
+            skill_name = args.get("skill", "")
+            if isinstance(skill_name, str) and skill_name:
+                return {"name": skill_name}
+    return None
+
+
+def _tool_result_phase(content: str) -> str:
+    """Detect whether a tool result represents an error."""
+    if not content:
+        return "end"
+    stripped = content.strip()
+    if stripped.startswith("Error:") or stripped.startswith("Error "):
+        return "error"
+    return "end"
+
+
+def _truncate_tool_result(content: str) -> str:
+    if len(content) <= _TOOL_RESULT_MAX_CHARS:
+        return content
+    return content[:_TOOL_RESULT_MAX_CHARS] + "\n\n…(truncated)"
+
+
+def _simplify_tool_args(name: str, args: str) -> str:
+    """Simplify tool call arguments for display in trace lines.
+
+    For ``spawn`` and ``long_task``, only keep the ``label`` / ``ui_summary``
+    field to avoid enormous trace lines from verbose task descriptions.
+    """
+    if name not in ("spawn", "long_task"):
+        return args
+    if not args or not args.strip():
+        return args
+    try:
+        obj = json.loads(args)
+    except (json.JSONDecodeError, TypeError):
+        return args
+    if not isinstance(obj, dict):
+        return args
+    if name == "spawn" and isinstance(obj.get("label"), str):
+        return json.dumps({"label": obj["label"]}, ensure_ascii=False)
+    if name == "long_task":
+        kept: dict[str, Any] = {}
+        if isinstance(obj.get("label"), str):
+            kept["label"] = obj["label"]
+        if isinstance(obj.get("ui_summary"), str):
+            kept["ui_summary"] = obj["ui_summary"]
+        if kept:
+            return json.dumps(kept, ensure_ascii=False)
+    return args
+
+
+def _session_messages_to_transcript_lines(
+    session_key: str,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Convert session JSONL messages to transcript lines in memory.
+
+    Used as a fallback when no on-disk webui transcript exists (e.g. channel
+    sessions like feishu, telegram, slack).
+    """
+    chat_id = _chat_id_from_any_session_key(session_key)
+    lines: list[dict[str, Any]] = []
+    # Track call_id → arguments so end/error events reuse the same args,
+    # which produces the same trace line and avoids duplicates in the UI.
+    call_args: dict[str, str] = {}
+
+    def _row(event: str, **extra: Any) -> dict[str, Any]:
+        r: dict[str, Any] = {"event": event}
+        if chat_id:
+            r["chat_id"] = chat_id
+        r.update(extra)
+        return r
+
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+        text = content if isinstance(content, str) else ""
+
+        if role == "user":
+            row = _row("user", text=text)
+            media = msg.get("media")
+            if isinstance(media, list) and media:
+                row["media_paths"] = [str(p) for p in media if isinstance(p, str) and p]
+            for key in ("cli_apps", "mcp_presets"):
+                value = msg.get(key)
+                if isinstance(value, list) and value:
+                    row[key] = json.loads(json.dumps(value, ensure_ascii=False))
+            lines.append(row)
+        elif role == "assistant":
+            # Emit reasoning *before* tool_hint so the activity cluster shows
+            # thinking first, then tool traces (matches the original message order).
+            reasoning = msg.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning.strip():
+                lines.append(_row("message", kind="reasoning", text=reasoning.strip()))
+            tool_calls = msg.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                tool_events: list[dict[str, Any]] = []
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    fn = tc.get("function") if "function" in tc else tc
+                    if not isinstance(fn, dict):
+                        continue
+                    name = fn.get("name", "")
+                    if not name or _is_internal_tool_name(name):
+                        continue
+                    cid = tc.get("id", "")
+                    raw_args = fn.get("arguments", "")
+                    simplified = _simplify_tool_args(name, raw_args)
+                    if cid:
+                        call_args[cid] = simplified
+                    event: dict[str, Any] = {
+                        "name": name,
+                        "arguments": simplified,
+                        "call_id": cid,
+                        "phase": "start",
+                    }
+                    skill_load = _extract_skill_load(name, raw_args)
+                    if skill_load:
+                        event["skill_load"] = skill_load
+                    tool_events.append(event)
+                if tool_events:
+                    lines.append(_row("message", kind="tool_hint", text="",
+                                      tool_events=tool_events))
+            if text.strip():
+                lines.append(_row("message", text=text))
+        elif role == "tool":
+            name = msg.get("name", "")
+            if _is_internal_tool_name(name) or not isinstance(name, str) or not name:
+                continue
+            call_id = msg.get("tool_call_id", "")
+            content_text = text.strip() if text else ""
+            phase = _tool_result_phase(content_text)
+            result_text = _truncate_tool_result(content_text) if content_text else name
+            # Carry over the original arguments so the trace line stays
+            # identical and deduplicates properly when merged.
+            args = call_args.get(call_id, "")
+            end_event: dict[str, Any] = {
+                "phase": phase,
+                "call_id": call_id,
+                "name": name,
+                "arguments": args,
+                "result": result_text,
+            }
+            skill_load = _extract_skill_load(name, args)
+            if skill_load:
+                end_event["skill_load"] = skill_load
+            lines.append(_row("message", kind="progress", text="", tool_events=[end_event]))
+        elif role == "system" and text.strip():
+            lines.append(_row("message", kind="divider", text=text.strip()))
+
+    return lines
+
+
 def write_session_messages_as_transcript(
     target_key: str,
     messages: list[dict[str, Any]],
@@ -797,6 +979,10 @@ def write_session_messages_as_transcript(
             media = msg.get("media")
             if isinstance(media, list) and media:
                 row["media"] = [str(p) for p in media if isinstance(p, str) and p]
+        elif role == "system" and text.strip():
+            row = {"event": "message", "chat_id": target_chat_id, "kind": "divider", "text": text.strip()}
+            rows.append(row)
+            continue
         else:
             continue
         rows.append(row)
@@ -1496,13 +1682,16 @@ def replay_transcript_to_ui_messages(
         for i, m in enumerate(messages):
             sf_id = m.get("subagentTaskId") if isinstance(m.get("subagentTaskId"), str) else None
             if is_reasoning_only_placeholder(m) and not is_tool_trace_at(i + 1, sf_id=sf_id):
-                continue
+                if not isinstance(m.get("latencyMs"), (int, float)):
+                    continue
             kept.append(m)
         messages = kept
 
     def stamp_latency(latency_ms: int) -> None:
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == "assistant" and messages[i].get("kind") != "trace":
+                if messages[i].get("subagentTaskId"):
+                    continue
                 messages[i] = {
                     **messages[i],
                     "latencyMs": latency_ms,
@@ -1777,6 +1966,15 @@ def replay_transcript_to_ui_messages(
             ):
                 continue
             kind = rec.get("kind")
+            if kind == "divider":
+                messages.append({
+                    "id": _new_id("div", idx),
+                    "role": "system",
+                    "kind": "divider",
+                    "content": rec.get("text", ""),
+                    "createdAt": _ts_base + idx,
+                })
+                continue
             if kind == "reasoning":
                 line = rec.get("text")
                 if not isinstance(line, str) or not line:
@@ -1897,6 +2095,17 @@ def replay_transcript_to_ui_messages(
             buffer_parts = []
             continue
 
+        if ev == "subagent_end":
+            task_id = rec.get("_subagent_task_id")
+            lat = rec.get("latency_ms")
+            if isinstance(task_id, str) and isinstance(lat, (int, float)) and lat >= 0:
+                for i in range(len(messages) - 1, -1, -1):
+                    m = messages[i]
+                    if m.get("subagentTaskId") == task_id:
+                        messages[i] = {**m, "latencyMs": int(lat)}
+                        break
+            continue
+
     for i, m in enumerate(messages):
         if (
             augment_assistant_text is not None
@@ -1961,6 +2170,8 @@ def build_webui_thread_response(
         lines, page = _select_transcript_page(session_key, limit=limit, before=before)
     else:
         lines = read_transcript_lines(session_key)
+    if not lines and session_messages:
+        lines = _session_messages_to_transcript_lines(session_key, session_messages)
     if not lines:
         return None
     lines = inject_missing_user_events_from_session(session_key, lines, session_messages)

@@ -224,7 +224,7 @@ class TestCmdNewUnifiedSession:
 
     @pytest.mark.asyncio
     async def test_cmd_new_clears_unified_session(self, tmp_path: Path):
-        """cmd_new called with key='unified:default' clears the shared session."""
+        """cmd_new called with key='unified:default' preserves messages with last_consolidated."""
         sessions = SessionManager(tmp_path)
 
         # Pre-populate the shared session with some messages
@@ -234,33 +234,36 @@ class TestCmdNewUnifiedSession:
         sessions.save(shared)
         assert len(sessions.get_or_create("unified:default").messages) == 2
 
-        # _schedule_background is a *sync* method that schedules a coroutine via
-        # asyncio.create_task().  Mirror that exactly so the coroutine is consumed
-        # and no RuntimeWarning is emitted.
         loop = SimpleNamespace(
             sessions=sessions,
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
+            context=SimpleNamespace(timezone="UTC"),
+            bot_icon="",
+            bot_name="test-bot",
+            model="test-model",
+            gateway_url="",
         )
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
         msg = InboundMessage(
             channel="telegram", sender_id="user1", chat_id="111", content="/new",
-            session_key_override="unified:default",  # as _dispatch() would set it
+            session_key_override="unified:default",
         )
         ctx = CommandContext(msg=msg, session=None, key="unified:default", raw="/new", loop=loop)
 
         result = await cmd_new(ctx)
 
         assert "New session started" in result.content
-        # Invalidate cache and reload from disk to confirm persistence
         sessions.invalidate("unified:default")
         reloaded = sessions.get_or_create("unified:default")
-        assert reloaded.messages == []
+        assert len(reloaded.messages) == 3
+        assert reloaded.last_consolidated == 3
+        assert reloaded.get_history() == []
 
     @pytest.mark.asyncio
     async def test_cmd_new_in_unified_mode_does_not_affect_other_sessions(self, tmp_path: Path):
-        """Clearing unified:default must not touch other sessions on disk."""
+        """Resetting unified:default must not touch other sessions on disk."""
         sessions = SessionManager(tmp_path)
 
         other = sessions.get_or_create("discord:999")
@@ -275,6 +278,11 @@ class TestCmdNewUnifiedSession:
             sessions=sessions,
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
+            context=SimpleNamespace(timezone="UTC"),
+            bot_icon="",
+            bot_name="test-bot",
+            model="test-model",
+            gateway_url="",
         )
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
@@ -287,7 +295,9 @@ class TestCmdNewUnifiedSession:
 
         sessions.invalidate("unified:default")
         sessions.invalidate("discord:999")
-        assert sessions.get_or_create("unified:default").messages == []
+        shared_after = sessions.get_or_create("unified:default")
+        assert len(shared_after.messages) == 2
+        assert shared_after.last_consolidated == 2
         assert len(sessions.get_or_create("discord:999").messages) == 1
 
 

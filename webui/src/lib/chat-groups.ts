@@ -64,6 +64,10 @@ export function groupSessions(
     activeSessions.push(session);
   }
 
+  // Separate channels folder from other folders
+  const channelsFolder = folders.find(f => f.id === "__channels__");
+  const regularFolders = folders.filter(f => f.id !== "__channels__");
+
   // Build folder groups
   const folderBuckets = new Map<string, ChatSummary[]>();
   const chatsSessions: ChatSummary[] = [];
@@ -81,8 +85,8 @@ export function groupSessions(
 
   const groups: SessionGroup[] = [];
 
-  // Add custom folder groups (sorted by folder order), above Chats
-  for (const folder of folders) {
+  // Add regular folder groups (sorted by folder order), above Chats
+  for (const folder of regularFolders) {
     const bucket = folderBuckets.get(folder.id) ?? [];
     const sorted = sortFolderSessions(bucket, options.sort, options.titleOverrides, pinned);
     groups.push({
@@ -103,6 +107,19 @@ export function groupSessions(
     sessions: sortedChats,
     totalCount: chatsSessions.length,
   });
+
+  // Add Channels group below Chats
+  if (channelsFolder) {
+    const bucket = folderBuckets.get("__channels__") ?? [];
+    const sorted = sortFolderSessions(bucket, options.sort, options.titleOverrides, pinned);
+    groups.push({
+      id: "folder:__channels__",
+      label: channelsFolder.name,
+      kind: "folder" as const,
+      sessions: sorted,
+      totalCount: bucket.length,
+    });
+  }
 
   // Add archived group if needed
   if (archivedSessions.length) {
@@ -285,8 +302,10 @@ function groupSessionsByProject(
 
     const folders = options.folders ?? [];
     const sessionFolder = options.sessionFolder ?? {};
+    const channelsFolder = folders.find(f => f.id === "__channels__");
+    const regularFolders = folders.filter(f => f.id !== "__channels__");
 
-    if (folders.length) {
+    if (regularFolders.length) {
       // Apply folder grouping to default-workspace conversations
       const folderBuckets = new Map<string, ChatSummary[]>();
       const chatsSessions: ChatSummary[] = [];
@@ -302,7 +321,7 @@ function groupSessionsByProject(
         }
       }
 
-      for (const folder of folders) {
+      for (const folder of regularFolders) {
         const bucket = folderBuckets.get(folder.id) ?? [];
         groups.push({
           id: `folder:${folder.id}`,
@@ -332,6 +351,23 @@ function groupSessionsByProject(
         ),
         totalCount: chatsSessions.length,
       });
+
+      // Add Channels group below Chats
+      if (channelsFolder) {
+        const bucket = folderBuckets.get("__channels__") ?? [];
+        groups.push({
+          id: "folder:__channels__",
+          label: channelsFolder.name,
+          kind: "folder" as const,
+          sessions: sortFolderSessions(
+            bucket,
+            options.sort,
+            options.titleOverrides,
+            pinned,
+          ),
+          totalCount: bucket.length,
+        });
+      }
     } else {
       groups.push({
         id: "workspace:chats",
@@ -347,6 +383,17 @@ function groupSessionsByProject(
         ),
         totalCount: conversations.length,
       });
+
+      // Add Channels group below Chats (empty when no channel sessions)
+      if (channelsFolder) {
+        groups.push({
+          id: "folder:__channels__",
+          label: channelsFolder.name,
+          kind: "folder" as const,
+          sessions: [],
+          totalCount: 0,
+        });
+      }
     }
   }
 

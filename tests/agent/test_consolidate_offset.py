@@ -507,7 +507,7 @@ class TestNewCommandArchival:
 
     @pytest.mark.asyncio
     async def test_new_clears_session_immediately_even_if_archive_fails(self, tmp_path: Path) -> None:
-        """/new clears session immediately; archive is fire-and-forget."""
+        """/new preserves messages but marks all as consolidated; archive is fire-and-forget."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
@@ -534,7 +534,9 @@ class TestNewCommandArchival:
         assert "new session started" in response.content.lower()
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 0
+        assert len(session_after.messages) == 11
+        assert session_after.last_consolidated == 11
+        assert session_after.get_history() == []
 
         await loop.close_mcp()
         assert call_count == 1
@@ -594,7 +596,10 @@ class TestNewCommandArchival:
 
         assert response is not None
         assert "new session started" in response.content.lower()
-        assert loop.sessions.get_or_create("cli:test").messages == []
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 7
+        assert session_after.last_consolidated == 7
+        assert session_after.get_history() == []
 
     @pytest.mark.asyncio
     async def test_close_mcp_drains_background_tasks(self, tmp_path: Path) -> None:

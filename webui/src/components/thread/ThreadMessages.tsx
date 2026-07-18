@@ -236,6 +236,8 @@ export function ThreadMessages({
                     onOpenSubagent={onOpenSubagent}
                   />
                 </MessageRow>
+              ) : unit.message.kind === "divider" ? (
+                <MessageBubble message={unit.message} />
               ) : (
                 <MessageRow
                   role={unit.message.role}

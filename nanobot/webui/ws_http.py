@@ -78,8 +78,10 @@ from nanobot.webui.session_automations import (
 )
 from nanobot.webui.session_list_index import list_webui_sessions
 from nanobot.webui.sidebar_state import (
+    CHANNELS_FOLDER_ID,
     create_folder,
     delete_folder,
+    ensure_channels_folder,
     move_session_to_folder,
     read_webui_sidebar_state,
     rename_folder,
@@ -415,13 +417,17 @@ class GatewayHTTPHandler:
         sessions = list_webui_sessions(self.session_manager)
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
+        ensure_channels_folder()
         sidebar_state = read_webui_sidebar_state()
         session_folder = sidebar_state.get("session_folder", {})
 
         cleaned = []
         for s in sessions:
             key = s.get("key")
-            if not (isinstance(key, str) and key.startswith("websocket:")):
+            if not isinstance(key, str):
+                continue
+            # Filter out internal sessions (dream memory consolidation, cli, etc.)
+            if key.startswith("dream:") or key.startswith("cli:"):
                 continue
             row = {k: v for k, v in s.items() if k != "path"}
             chat_id = key.split(":", 1)[1]
@@ -430,7 +436,12 @@ class GatewayHTTPHandler:
                 row["run_started_at"] = started_at
             scope = self.workspaces.scope_for_session_key(key)
             row["workspace_scope"] = scope.payload()
-            row["folder_id"] = session_folder.get(key)
+            # Auto-assign channel sessions to built-in Channels folder
+            prefix = key.split(":", 1)[0]
+            if prefix not in ("websocket",):
+                row["folder_id"] = CHANNELS_FOLDER_ID
+            else:
+                row["folder_id"] = session_folder.get(key)
             cleaned.append(row)
         return {"sessions": cleaned}
 
@@ -442,8 +453,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         data = self.session_manager.read_session_file(decoded_key)
         if data is None:
             return _http_error(404, "session not found")
@@ -459,8 +468,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         scope = self.workspaces.scope_for_session_key(decoded_key)
         session_messages: list[dict[str, Any]] | None = None
         session_created_at: str | None = None
@@ -526,8 +533,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         path = _query_first(_parse_query(request.path), "path")
         try:
             payload = file_preview_payload(
@@ -544,8 +549,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         raw_path = _query_first(_parse_query(request.path), "path")
         cleaned = (raw_path or "").strip()
         if not cleaned:
@@ -586,8 +589,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         subpath = _query_first(_parse_query(request.path), "path") or "."
         try:
             payload = list_workspace_files(
@@ -605,8 +606,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         pending_job_ids: set[str] = set()
         if self.cron_pending_job_ids is not None:
             pending_job_ids = self.cron_pending_job_ids(decoded_key)
@@ -626,8 +625,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         query = _parse_query(request.path)
         delete_automations = (_query_first(query, "delete_automations") or "").lower()
         automation_jobs = session_automation_jobs(self.cron_service, decoded_key)
@@ -808,8 +805,6 @@ class GatewayHTTPHandler:
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
 
         query = _parse_query(request.path)
         raw_path = _query_first(query, "path")
@@ -1148,6 +1143,8 @@ class GatewayHTTPHandler:
     def _handle_folder_delete(self, request: WsRequest, folder_id: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
+        if folder_id == CHANNELS_FOLDER_ID:
+            return _http_error(400, "cannot delete built-in folder")
         try:
             state = delete_folder(folder_id)
         except ValueError:
@@ -1340,7 +1337,3 @@ def _positive_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value if value > 0 else None
-
-
-def _is_websocket_channel_session_key(key: str) -> bool:
-    return key.startswith("websocket:")

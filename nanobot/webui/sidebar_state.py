@@ -30,6 +30,9 @@ _MAX_FOLDER_NAME_LEN = 40
 _MAX_FOLDERS = 50
 _MAX_FOLDER_ID_LEN = 36
 
+CHANNELS_FOLDER_ID = "__channels__"
+CHANNELS_FOLDER_NAME = "Channels"
+
 
 def webui_sidebar_state_path() -> Path:
     return get_webui_dir() / "sidebar-state.json"
@@ -261,6 +264,8 @@ def rename_folder(folder_id: str, name: str) -> dict[str, Any]:
 
 def delete_folder(folder_id: str) -> dict[str, Any]:
     """Delete a folder, moving its sessions back to Chats, and return updated state."""
+    if folder_id == CHANNELS_FOLDER_ID:
+        raise ValueError("cannot delete built-in folder")
     state = read_webui_sidebar_state()
     state["folders"] = [f for f in state["folders"] if f["id"] != folder_id]
     for i, f in enumerate(state["folders"]):
@@ -286,3 +291,18 @@ def move_session_to_folder(session_key: str, folder_id: str | None) -> dict[str,
 def _new_folder_id() -> str:
     import uuid
     return uuid.uuid4().hex[:12]
+
+
+def ensure_channels_folder() -> None:
+    """Ensure the built-in Channels folder exists in the sidebar state."""
+    state = read_webui_sidebar_state()
+    if any(f["id"] == CHANNELS_FOLDER_ID for f in state["folders"]):
+        return
+    state["folders"].insert(0, {
+        "id": CHANNELS_FOLDER_ID,
+        "name": CHANNELS_FOLDER_NAME,
+        "order": 0,
+    })
+    for i, f in enumerate(state["folders"]):
+        f["order"] = i
+    write_webui_sidebar_state(state)

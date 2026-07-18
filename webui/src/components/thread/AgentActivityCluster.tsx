@@ -530,6 +530,51 @@ export interface SubagentGroup {
   taskId: string;
   title: string;
   messages: UIMessage[];
+  latencyMs?: number;
+}
+
+export type SubagentStatus = "pending" | "running" | "completed";
+
+const SUBAGENT_SPAWN_RESULT_RE = /^Subagent \[(.*?)\] started \(id: (.*?)\)\./;
+
+/** Determine the status of a subagent by checking parent messages for its announce. */
+export function getSubagentStatus(
+  group: SubagentGroup,
+  parentMessages: UIMessage[],
+  isTurnStreaming: boolean,
+): SubagentStatus {
+  const announceFound = parentMessages.some(
+    (m) =>
+      m.role === "assistant" &&
+      typeof m.content === "string" &&
+      m.content.includes(`[Subagent '${group.title}'`) &&
+      (m.content.includes("completed") || m.content.includes("failed")),
+  );
+  if (announceFound || !isTurnStreaming) return "completed";
+
+  const hasActivity =
+    group.messages.some((m) => m.kind === "trace") ||
+    group.messages.some((m) => isReasoningOnlyAssistant(m));
+  return hasActivity ? "running" : "pending";
+}
+
+/** Extract task IDs of spawned subagents from spawn tool results in parent trace messages. */
+function extractSpawnedTaskIds(
+  parentMessages: UIMessage[],
+): { taskId: string; title: string }[] {
+  const spawned: { taskId: string; title: string }[] = [];
+  for (const msg of parentMessages) {
+    if (msg.kind !== "trace" || !msg.toolEvents) continue;
+    for (const ev of msg.toolEvents) {
+      if (ev.name !== "spawn") continue;
+      const result = typeof ev.result === "string" ? ev.result : "";
+      const match = SUBAGENT_SPAWN_RESULT_RE.exec(result);
+      if (match) {
+        spawned.push({ title: match[1], taskId: match[2] });
+      }
+    }
+  }
+  return spawned;
 }
 
 /** Split activity messages into parent and subagent groups by ``subagentTaskId``. */
@@ -559,11 +604,22 @@ export function groupMessagesBySubagent(messages: UIMessage[]): {
 
   return {
     parentMessages,
-    subagentGroups: Array.from(subagentMap.entries()).map(([taskId, g]) => ({
-      taskId,
-      title: g.title,
-      messages: g.messages,
-    })),
+    subagentGroups: Array.from(subagentMap.entries()).map(([taskId, g]) => {
+      let latencyMs: number | undefined;
+      for (let i = g.messages.length - 1; i >= 0; i--) {
+        const lat = g.messages[i].latencyMs;
+        if (typeof lat === "number" && Number.isFinite(lat) && lat >= 0) {
+          latencyMs = lat;
+          break;
+        }
+      }
+      return {
+        taskId,
+        title: g.title,
+        messages: g.messages,
+        latencyMs,
+      };
+    }),
   };
 }
 
@@ -624,7 +680,24 @@ export function AgentActivityCluster({
     () => groupMessagesBySubagent(messages),
     [messages],
   );
-  const hasSubagentActivity = subagentGroups.length > 0;
+
+  const subagentEntries = useMemo(() => {
+    const existingIds = new Set(subagentGroups.map((g) => g.taskId));
+    const spawned = isTurnStreaming ? extractSpawnedTaskIds(parentMessages) : [];
+    const pendingGroups = spawned
+      .filter((s) => !existingIds.has(s.taskId))
+      .map((s) => ({ taskId: s.taskId, title: s.title, messages: [] as UIMessage[] }));
+
+    return [
+      ...pendingGroups.map((g) => ({ group: g, status: "pending" as SubagentStatus })),
+      ...subagentGroups.map((g) => ({
+        group: g,
+        status: getSubagentStatus(g, parentMessages, isTurnStreaming),
+      })),
+    ];
+  }, [subagentGroups, parentMessages, isTurnStreaming]);
+
+  const hasSubagentEntries = subagentEntries.length > 0;
 
   const parentGroups = useMemo(() => groupActivityMessages(parentMessages), [parentMessages]);
   const parentRounds = useMemo(() => groupActivityRounds(parentGroups), [parentGroups]);
@@ -638,6 +711,13 @@ export function AgentActivityCluster({
 
   const totalDuration = useMemo(() => {
     if (turnLatencyMs != null) return formatActivityDuration(turnLatencyMs);
+    // Check messages for latencyMs (used by subagent_end events)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const lat = messages[i].latencyMs;
+      if (typeof lat === "number" && Number.isFinite(lat) && lat >= 0) {
+        return formatActivityDuration(lat);
+      }
+    }
     const timestamps = messages
       .map((m) => m.createdAt)
       .filter((v) => Number.isFinite(v));
@@ -650,7 +730,7 @@ export function AgentActivityCluster({
 
   if (!hasVisibleActivity) return null;
 
-  if (hasOnlyFileActivity && !hasSubagentActivity) {
+  if (hasOnlyFileActivity && !hasSubagentEntries) {
     const singleFilePath = counts.fileCount === 1 ? counts.primaryFilePath : undefined;
     const singleFileTooltipPath = counts.fileCount === 1 ? counts.primaryFileTooltipPath : undefined;
     const hasLiveEditingFiles = isTurnStreaming && counts.hasEditingFiles;
@@ -693,12 +773,12 @@ export function AgentActivityCluster({
           />
         );
       })}
-      {subagentGroups.map((group) =>
+      {subagentEntries.map(({ group, status }) =>
         onOpenSubagent ? (
           <SubagentLinkButton
             key={`subagent:${group.taskId}`}
             group={group}
-            isTurnStreaming={isTurnStreaming}
+            status={status}
             onClick={() => onOpenSubagent(group.taskId)}
           />
         ) : (
@@ -873,7 +953,7 @@ function shortFileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-function formatActivityDuration(ms: number): string {
+export function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -1130,6 +1210,17 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
     const summary = extractArgField(toolEvent, "ui_summary");
     return { kind: "tool", label: "Using", detail: summary ? `long_task ${summary}` : "long_task", error: errored };
   }
+  if (/^plan$/i.test(name)) {
+    const args = parseToolEventArguments(toolEvent);
+    const record = (args && typeof args === "object" && !Array.isArray(args)) ? args as Record<string, unknown> : {};
+    const action = typeof record.action === "string" && record.action.trim() ? record.action.trim() : "";
+    const title = (typeof record.title === "string" && record.title.trim())
+      || extractPlanTitle(toolEvent?.result);
+    const detail = `plan · ${action
+      ? (title ? `${action}(${truncateMiddle(title, 60)})` : action)
+      : (title ? truncateMiddle(title, 60) : name)}`;
+    return { kind: "tool", label: "Using", detail, error: errored };
+  }
   if (/search/i.test(name)) {
     const provider = extractProviderFromResult(toolEvent?.result);
     return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed), provider, error: errored };
@@ -1318,7 +1409,7 @@ function formatTraceUrl(url: URL): string {
 
 function previewTraceDetail(args: string, fallback: string): string {
   const compactArgs = args.trim();
-  if (!compactArgs) return fallback;
+  if (!compactArgs) return truncateMiddle(fallback, 160);
   try {
     const parsed = JSON.parse(compactArgs) as unknown;
     const preview = previewMcpArgs(parsed);
@@ -1326,7 +1417,7 @@ function previewTraceDetail(args: string, fallback: string): string {
   } catch {
     // Keep the original trace text for non-JSON progress hints.
   }
-  return compactArgs.replace(/^["']|["']$/g, "");
+  return truncateMiddle(compactArgs.replace(/^["']|["']$/g, ""), 160);
 }
 
 const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
@@ -1499,20 +1590,16 @@ function previewScalar(value: unknown): string | null {
 
 function previewMcpArgs(argsObject: unknown): string {
   if (!argsObject || typeof argsObject !== "object" || Array.isArray(argsObject)) {
-    return previewScalar(argsObject) ?? "";
+    return truncateMiddle(previewScalar(argsObject) ?? "", 160);
   }
   const record = argsObject as Record<string, unknown>;
-  // for (const key of ["url", "query", "q", "path", "name", "id", "title", "message", "text"]) {
-  //   const preview = previewScalar(record[key]);
-  //   if (preview) return `${preview}`;
-  // }
   const entries: string[] = [];
   for (const value of Object.values(record)) {
     const p = previewScalar(value);
     if (p !== null) entries.push(p);
     if (entries.length >= 2) break;
   }
-  return entries.join(", ");
+  return truncateMiddle(entries.join(", "), 160);
 }
 
 function mcpRunFromToolName(
@@ -1982,41 +2069,88 @@ function alphaColor(color: string, percent: number): string {
 /** Clickable chip shown in place of inline subagent activity when the drawer is available. */
 function SubagentLinkButton({
   group,
-  isTurnStreaming,
+  status,
   onClick,
 }: {
   group: SubagentGroup;
-  isTurnStreaming: boolean;
+  status: SubagentStatus;
   onClick: () => void;
 }) {
   const toolCount = group.messages.filter((m) => m.kind === "trace").length;
   const reasoningCount = group.messages.filter((m) => isReasoningOnlyAssistant(m)).length;
+
+  const colorSet =
+    status === "completed"
+      ? {
+          border: "border-emerald-400/30",
+          bg: "bg-emerald-50/40",
+          hoverBg: "hover:bg-emerald-100/50",
+          hoverBorder: "hover:border-emerald-400/50",
+          darkBg: "dark:bg-emerald-950/20",
+          darkHoverBg: "dark:hover:bg-emerald-950/40",
+          icon: "text-emerald-500/70",
+          title: "text-emerald-700/80 dark:text-emerald-300/80",
+        }
+      : status === "pending"
+        ? {
+            border: "border-slate-300/30",
+            bg: "bg-slate-50/40",
+            hoverBg: "hover:bg-slate-100/50",
+            hoverBorder: "hover:border-slate-400/40",
+            darkBg: "dark:bg-slate-800/20",
+            darkHoverBg: "dark:hover:bg-slate-800/40",
+            icon: "text-slate-400/50",
+            title: "text-slate-500/70 dark:text-slate-400/60",
+          }
+        : {
+            border: "border-violet-400/30",
+            bg: "bg-violet-50/40",
+            hoverBg: "hover:bg-violet-100/50",
+            hoverBorder: "hover:border-violet-400/50",
+            darkBg: "dark:bg-violet-950/20",
+            darkHoverBg: "dark:hover:bg-violet-950/40",
+            icon: "text-violet-500/70",
+            title: "text-violet-700/80 dark:text-violet-300/80",
+          };
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-50/40 px-3 py-2",
-        "text-left transition-colors hover:bg-violet-100/50 hover:border-violet-400/50",
-        "dark:bg-violet-950/20 dark:hover:bg-violet-950/40",
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+        colorSet.border,
+        colorSet.bg,
+        colorSet.hoverBg,
+        colorSet.hoverBorder,
+        colorSet.darkBg,
+        colorSet.darkHoverBg,
       )}
     >
-      <Bot className="h-4 w-4 shrink-0 text-violet-500/70" />
+      <Bot className={cn("h-4 w-4 shrink-0", colorSet.icon)} />
       <div className="min-w-0 flex-1">
-        <StreamingLabelSheen
-          active={isTurnStreaming}
-          className="text-[12.5px] font-medium text-violet-700/80 dark:text-violet-300/80"
-        >
-          {group.title}
-        </StreamingLabelSheen>
+        <div className="flex items-center gap-2">
+          <StreamingLabelSheen
+            active={status === "running"}
+            className={cn("text-[12.5px] font-medium", colorSet.title)}
+          >
+            {group.title}
+          </StreamingLabelSheen>
+          {group.latencyMs != null && (
+            <span className="text-[11px] text-muted-foreground/45 shrink-0">
+              {formatActivityDuration(group.latencyMs)}
+            </span>
+          )}
+        </div>
         <div className="text-[11px] text-muted-foreground/65">
-          {[
-            reasoningCount ? `${reasoningCount} thoughts` : "",
-            toolCount ? `${toolCount} tool calls` : "",
-          ]
-            .filter(Boolean)
-            .join(", ") || "View details"}
+          {status === "pending"
+            ? "Starting..."
+            : [
+                reasoningCount ? `${reasoningCount} thoughts` : "",
+                toolCount ? `${toolCount} tool calls` : "",
+              ]
+                .filter(Boolean)
+                .join(", ") || "View details"}
         </div>
       </div>
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />

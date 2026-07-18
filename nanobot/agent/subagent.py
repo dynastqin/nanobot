@@ -215,6 +215,26 @@ class SubagentManager:
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
+    async def _publish_subagent_end(
+        self,
+        task_id: str,
+        label: str,
+        origin: dict[str, str],
+        latency_ms: int,
+    ) -> None:
+        """Publish a subagent_end event with wall-clock latency."""
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=origin["channel"],
+            chat_id=origin["chat_id"],
+            content="",
+            metadata={
+                "_subagent_end": True,
+                "_subagent_task_id": task_id,
+                "_subagent_title": label,
+                "latency_ms": latency_ms,
+            },
+        ))
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -253,6 +273,7 @@ class SubagentManager:
                 else None
             )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
+            latency_ms = 0
             try:
                 # Build a progress callback that publishes subagent tool events
                 # to the message bus so the WebUI can render them inline.
@@ -289,6 +310,7 @@ class SubagentManager:
                 subagent_hook = _SubagentHook(task_id, status)
                 hook = CompositeHook([progress_hook, subagent_hook])
 
+                start_wall = time.time()
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
@@ -307,6 +329,8 @@ class SubagentManager:
                     workspace=root,
                     llm_timeout_s=llm_timeout,
                 ))
+                end_wall = time.time()
+                latency_ms = int((end_wall - start_wall) * 1000)
             finally:
                 if token is not None:
                     reset_workspace_scope(token)
@@ -331,11 +355,14 @@ class SubagentManager:
                 logger.info("Subagent [{}] completed successfully", task_id)
                 await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
 
+            await self._publish_subagent_end(task_id, label, origin, latency_ms)
+
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
             await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            await self._publish_subagent_end(task_id, label, origin, latency_ms)
 
     async def _announce_result(
         self,

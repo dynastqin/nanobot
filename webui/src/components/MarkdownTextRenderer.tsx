@@ -15,6 +15,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
+import { ArtifactCard } from "@/components/ArtifactCard";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
 import {
@@ -35,6 +36,7 @@ interface MarkdownTextRendererProps {
   highlightCode?: boolean;
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
+  createdAt?: number;
 }
 
 type MarkdownAstNode = {
@@ -393,6 +395,7 @@ export default function MarkdownTextRenderer({
   highlightCode = true,
   onOpenFilePreview,
   onOpenLink,
+  createdAt,
 }: MarkdownTextRendererProps) {
   const components = useMemo<Components>(
     () => ({
@@ -411,7 +414,7 @@ export default function MarkdownTextRenderer({
         }
         const raw = String(kids).replace(/\n$/, "");
         if (isLikelyFilePath(raw)) {
-          return <FileReferenceChip path={raw} onOpen={onOpenFilePreview} />;
+          return <ArtifactCard path={raw} createdAt={createdAt} onOpen={onOpenFilePreview} />;
         }
         /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
         const widePlainBlock = raw.includes("\n") || raw.length > 120;
@@ -476,10 +479,11 @@ export default function MarkdownTextRenderer({
         if (filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
-            <FileReferenceChip
-              path={label || filePath}
+            <ArtifactCard
+              path={filePath}
+              display={label || undefined}
               tooltipPath={filePath}
-              previewPath={filePath}
+              createdAt={createdAt}
               onOpen={onOpenFilePreview}
             />
           );
@@ -583,7 +587,7 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview, onOpenLink],
+    [highlightCode, onOpenFilePreview, onOpenLink, createdAt],
   );
 
   return (

@@ -13,7 +13,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
-import { groupMessagesBySubagent, type SubagentGroup } from "@/components/thread/AgentActivityCluster";
+import { groupMessagesBySubagent, getSubagentStatus } from "@/components/thread/AgentActivityCluster";
 import {
   Tooltip,
   TooltipContent,
@@ -427,10 +427,18 @@ export function ThreadShell({
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
 
-  const subagentGroups = useMemo<SubagentGroup[]>(
-    () => groupMessagesBySubagent(displayMessages).subagentGroups,
-    [displayMessages],
-  );
+  const { subagentGroups, subagentStatuses } = useMemo(() => {
+    const { parentMessages, subagentGroups: groups } =
+      groupMessagesBySubagent(displayMessages);
+    const statuses = new Map<string, string>();
+    for (const g of groups) {
+      statuses.set(
+        g.taskId,
+        getSubagentStatus(g, parentMessages, isStreaming),
+      );
+    }
+    return { subagentGroups: groups, subagentStatuses: statuses };
+  }, [displayMessages, isStreaming]);
 
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
@@ -970,6 +978,7 @@ export function ThreadShell({
           autoOpenFileSeq={rightPanel.autoOpenFileSeq}
           autoOpenSubagentTaskId={rightPanel.autoOpenSubagentTaskId}
           subagentGroups={subagentGroups}
+          subagentStatuses={subagentStatuses}
           isTurnStreaming={isStreaming}
           cliApps={cliApps}
           mcpPresets={mcpPresets}

@@ -1482,6 +1482,16 @@ function Shell({
       : t("app.documentTitle.base");
   }, [activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
+  const mergedSessionFolder = useMemo(() => {
+    const merged = { ...sidebarState.session_folder };
+    for (const s of sessions) {
+      if (s.folderId && !merged[s.key]) {
+        merged[s.key] = s.folderId;
+      }
+    }
+    return merged;
+  }, [sidebarState.session_folder, sessions]);
+
   const sidebarProps = {
     sessions,
     activeKey,
@@ -1520,7 +1530,7 @@ function Shell({
     onDeleteFolder: handleDeleteFolder,
     onMoveToFolder: handleMoveToFolder,
     folders: sidebarState.folders,
-    sessionFolder: sidebarState.session_folder,
+    sessionFolder: mergedSessionFolder,
     onRename: handleRenameSession,
     onDelete: handleDeleteSession,
   };
@@ -1659,7 +1669,7 @@ function Shell({
             activeKey={activeKey}
             loading={loading}
             titleOverrides={sidebarState.title_overrides}
-            sessionFolder={sidebarState.session_folder}
+            sessionFolder={mergedSessionFolder}
             folders={sidebarState.folders}
             onSelect={onSelectSearchResult}
           />

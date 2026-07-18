@@ -2,7 +2,7 @@ export type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-export type MessageKind = "message" | "trace";
+export type MessageKind = "message" | "trace" | "divider";
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 
@@ -884,6 +884,12 @@ export type InboundEvent =
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
     } & InboundTurnMetadata)
+  | {
+      event: "subagent_end";
+      chat_id: string;
+      latency_ms?: number;
+      _subagent_task_id?: string;
+    }
   | {
       event: "goal_status";
       chat_id: string;

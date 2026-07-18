@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_al
 MAX_FILE_PREVIEW_BYTES = 384 * 1024
 
 _GFM_TABLE_DELIMITER_RE = re.compile(r"^((?:\|[ \t]*[-:]+[ \t]*)+\|)\s*$", re.MULTILINE)
+
+_IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"})
 
 
 class WebUIFilePreviewError(ValueError):
@@ -60,6 +63,24 @@ def file_preview_payload(
             raw = f.read(max_bytes + 1)
     except OSError as e:
         raise WebUIFilePreviewError(500, "failed to read file") from e
+
+    ext = resolved.suffix.lower().lstrip(".")
+    if ext in _IMAGE_EXTENSIONS:
+        truncated = len(raw) > max_bytes
+        preview_bytes = raw[:max_bytes]
+        b64 = base64.b64encode(preview_bytes).decode("ascii")
+        mime_type = _image_mime_type(ext)
+        content = f"data:{mime_type};base64,{b64}"
+        display_path = _display_path(resolved, scope.project_path)
+        return {
+            "path": str(resolved),
+            "display_path": display_path,
+            "project_path": str(scope.project_path),
+            "language": "image",
+            "content": content,
+            "size": resolved.stat().st_size,
+            "truncated": truncated,
+        }
 
     if b"\0" in raw[:4096]:
         raise WebUIFilePreviewError(415, "binary files cannot be previewed")
@@ -110,6 +131,19 @@ def _display_path(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _image_mime_type(ext: str) -> str:
+    return {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "svg": "image/svg+xml",
+        "webp": "image/webp",
+        "bmp": "image/bmp",
+        "ico": "image/x-icon",
+    }.get(ext, "application/octet-stream")
 
 
 def _language_for_path(path: Path) -> str:

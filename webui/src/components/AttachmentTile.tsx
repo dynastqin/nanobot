@@ -105,9 +105,9 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
   }
 
   return (
-    <div
+    <span
       className={cn(
-        "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
+        "inline-flex max-w-[18rem] items-center gap-2 rounded-[14px]",
         "border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
         variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
         className,
@@ -119,7 +119,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
       <span className="sr-only">
         {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
       </span>
-    </div>
+    </span>
   );
 }
 

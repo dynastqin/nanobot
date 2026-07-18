@@ -3,6 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
+vi.mock("@/lib/api", () => ({
+  fetchFilePreview: vi.fn().mockResolvedValue({ size: 2048 }),
+}));
+
+vi.mock("@/providers/ClientProvider", () => ({
+  useClient: () => ({ token: "mock-token", client: {} as never, modelName: null }),
+}));
+
 describe("MarkdownTextRenderer", () => {
   it("renders clickable markdown links in blue", () => {
     render(<MarkdownTextRenderer>[local server](http://127.0.0.1:7891/)</MarkdownTextRenderer>);
@@ -12,25 +20,25 @@ describe("MarkdownTextRenderer", () => {
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
   });
 
-  it("renders local file links as previewable file references", () => {
+  it("renders local file links as previewable artifact cards", () => {
     const onOpenFilePreview = vi.fn();
     render(
       <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-        {"Edited [hook.py](/Users/test/project/nanobot/agent/hook.py:12)"}
+        {"Edited [hook.py](/Users/test/outputs/sess-abc/hook.py:12)"}
       </MarkdownTextRenderer>,
     );
 
-    const reference = screen.getByTestId("inline-file-path");
-    expect(reference).toHaveTextContent("hook.py");
-    expect(reference).toHaveAttribute(
+    const card = screen.getByTestId("artifact-card");
+    expect(card).toHaveTextContent("hook.py");
+    expect(card).toHaveAttribute(
       "aria-label",
-      "/Users/test/project/nanobot/agent/hook.py",
+      "/Users/test/outputs/sess-abc/hook.py",
     );
 
-    fireEvent.click(reference);
+    fireEvent.click(card);
 
     expect(onOpenFilePreview).toHaveBeenCalledWith(
-      "/Users/test/project/nanobot/agent/hook.py",
+      "/Users/test/outputs/sess-abc/hook.py",
     );
   });
 
@@ -60,6 +68,19 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "*.json" })).not.toBeInTheDocument();
     expect(container).toHaveTextContent("*.json");
+  });
+
+  it("renders artifact card with createdAt timestamp", () => {
+    const createdAt = new Date("2026-06-28T17:18:29").getTime();
+    render(
+      <MarkdownTextRenderer createdAt={createdAt}>
+        {"[report.md](outputs/sess-abc/report.md)"}
+      </MarkdownTextRenderer>,
+    );
+
+    const card = screen.getByTestId("artifact-card");
+    expect(card).toHaveTextContent("report.md");
+    expect(card).toHaveTextContent("2026/06/28 17:18:29");
   });
 
   it("keeps glob inline code as code instead of a file preview chip", () => {

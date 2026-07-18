@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.config.gateway_secret import load_or_create_gateway_secret
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.transcript import WebUITranscriptRecorder
@@ -54,6 +55,7 @@ def build_gateway_services(
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
+        secret=load_or_create_gateway_secret(),
         agent_info=f"nanobot v{__version__}",
     )
     transcripts = WebUITranscriptRecorder(log=logger)

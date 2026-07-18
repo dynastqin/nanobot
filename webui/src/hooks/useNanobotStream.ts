@@ -297,6 +297,21 @@ function stampLastAssistantLatency(
   return prev;
 }
 
+function stampSubagentLatency(
+  prev: UIMessage[],
+  taskId: string,
+  latencyMs: number,
+): UIMessage[] {
+  for (let i = prev.length - 1; i >= 0; i -= 1) {
+    const m = prev[i];
+    if (m.subagentTaskId === taskId) {
+      const merged: UIMessage = { ...m, latencyMs, isStreaming: false };
+      return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
+    }
+  }
+  return prev;
+}
+
 function absorbCompleteAssistantMessage(
   prev: UIMessage[],
   message: Omit<UIMessage, "id" | "role" | "createdAt">,
@@ -894,6 +909,15 @@ export function useNanobotStream(
           setRunStartedAt(ev.started_at);
         } else {
           setRunStartedAt(null);
+        }
+        return;
+      }
+
+      if (ev.event === "subagent_end") {
+        const taskId = ev._subagent_task_id;
+        const lat = ev.latency_ms;
+        if (typeof taskId === "string" && typeof lat === "number" && lat >= 0) {
+          setMessages((prev) => stampSubagentLatency(prev, taskId, Math.round(lat)));
         }
         return;
       }

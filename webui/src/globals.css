@@ -590,6 +590,71 @@
     }
   }
 
+  /* Flowing border for ArtifactCard on hover.
+     A thin gradient sweeps around the card edge to indicate interactivity. */
+  @keyframes artifact-card-flow {
+    0% { background-position: 200% 50%; }
+    100% { background-position: -200% 50%; }
+  }
+
+  .artifact-card-flow::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    padding: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--primary) / 0.06) 10%,
+      hsl(var(--primary) / 0.28) 30%,
+      hsl(var(--primary) / 0.06) 50%,
+      transparent 70%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .artifact-card-flow:hover::before {
+    opacity: 1;
+    animation: artifact-card-flow 2.5s ease-in-out infinite;
+  }
+
+  .dark .artifact-card-flow::before {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--primary) / 0.08) 10%,
+      hsl(var(--primary) / 0.34) 30%,
+      hsl(var(--primary) / 0.08) 50%,
+      transparent 70%,
+      transparent 100%
+    );
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .artifact-card-flow::before {
+      animation: none;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        hsl(var(--primary) / 0.12) 30%,
+        hsl(var(--primary) / 0.12) 44%,
+        transparent 58%,
+        transparent 100%
+      );
+      background-size: 200% 100%;
+    }
+  }
+
   /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;

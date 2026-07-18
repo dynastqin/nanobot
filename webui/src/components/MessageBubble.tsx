@@ -129,6 +129,16 @@ export function MessageBubble({
     });
   }, [message.content]);
 
+  if (message.kind === "divider") {
+    return (
+      <div className={cn("my-5 flex items-center gap-3 text-[11px] text-muted-foreground/80", baseAnim)}>
+        <span aria-hidden className="h-px flex-1 bg-border/70" />
+        <span className="shrink-0">{message.content}</span>
+        <span aria-hidden className="h-px flex-1 bg-border/70" />
+      </div>
+    );
+  }
+
   if (message.kind === "trace") {
     return <TraceGroup message={message} animClass={baseAnim} />;
   }
@@ -201,6 +211,7 @@ export function MessageBubble({
           hasBodyBelow={!empty}
           onOpenFilePreview={onOpenFilePreview}
           onOpenLink={onOpenLink}
+          createdAt={message.createdAt}
         />
       ) : null}
       {empty && message.isStreaming && !hasReasoning ? (
@@ -217,6 +228,7 @@ export function MessageBubble({
             streaming={!!message.isStreaming}
             onOpenFilePreview={onOpenFilePreview}
             onOpenLink={onOpenLink}
+            createdAt={message.createdAt}
           >
             {message.content}
           </MarkdownText>
@@ -605,6 +617,7 @@ interface ReasoningBubbleProps {
   embeddedInCluster?: boolean;
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
+  createdAt?: number;
 }
 
 /**
@@ -628,6 +641,7 @@ export function ReasoningBubble({
   embeddedInCluster = false,
   onOpenFilePreview,
   onOpenLink,
+  createdAt,
 }: ReasoningBubbleProps) {
   const { t } = useTranslation();
   const [userToggled, setUserToggled] = useState(false);
@@ -688,6 +702,7 @@ export function ReasoningBubble({
             streaming={streaming}
             onOpenFilePreview={onOpenFilePreview}
             onOpenLink={onOpenLink}
+            createdAt={createdAt}
             className={cn(
               "text-[12.5px] italic text-muted-foreground/88",
               "prose-p:my-1.5 prose-li:my-0.5",
