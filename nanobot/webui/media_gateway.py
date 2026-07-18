@@ -36,12 +36,14 @@ class WebUIMediaGateway:
         media_dir: Callable[[str | None], Path] | None = None,
         secret: bytes | None = None,
         agent_info: str = "",
+        clouddisk: Any | None = None,
     ) -> None:
         self.workspace_path = workspace_path
         self.logger = logger
         self._media_dir = media_dir or (lambda channel=None: get_media_dir(channel))
         self.secret = secret or secrets.token_bytes(32)
         self.agent_info = agent_info
+        self.clouddisk = clouddisk
 
     def serve_signed_media(
         self,

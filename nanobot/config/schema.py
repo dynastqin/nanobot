@@ -342,6 +342,15 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class CloudDiskConfig(Base):
+    """Instance-scoped persistent file storage (cloud disk)."""
+
+    enabled: bool = True
+    root_dir: str = ""  # empty = auto-derive <instance>/clouddisk/
+    quota_mb: int = 10240  # soft quota; warn but don't block writes
+    max_file_size_mb: int = 100
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -356,6 +365,7 @@ class Config(BaseSettings):
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
     )
+    clouddisk: CloudDiskConfig = Field(default_factory=CloudDiskConfig)
 
     def __init__(self, **values: Any) -> None:
         if not type(self).__pydantic_complete__:

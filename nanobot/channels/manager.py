@@ -130,6 +130,7 @@ class ChannelManager:
                         cron_service=self._cron_service,
                         cron_pending_job_ids=self._webui_cron_pending_job_ids,
                         channel_manager=self,
+                        root_config=self.config,
                         logger=logger,
                     )
                     kwargs["gateway"] = gateway

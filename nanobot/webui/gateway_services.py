@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.webui.clouddisk_api import create_clouddisk_gateway
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.transcript import WebUITranscriptRecorder
@@ -28,6 +29,7 @@ class GatewayServices:
     cron_service: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     channel_manager: Any | None = None
+    clouddisk: Any | None = None
 
 
 def build_gateway_services(
@@ -45,16 +47,28 @@ def build_gateway_services(
     cron_service: Any | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
     channel_manager: Any | None = None,
+    root_config: Any | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
 
     from nanobot import __version__
-    
+
+    # CloudDisk
+    clouddisk = None
+    if root_config is not None and getattr(root_config, "clouddisk", None) is not None:
+        cd = root_config.clouddisk
+        if cd.enabled:
+            clouddisk = create_clouddisk_gateway(
+                quota_mb=cd.quota_mb,
+                max_file_mb=cd.max_file_size_mb,
+            )
+
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
         agent_info=f"nanobot v{__version__}",
+        clouddisk=clouddisk,
     )
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
@@ -62,6 +76,7 @@ def build_gateway_services(
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
+
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -78,6 +93,7 @@ def build_gateway_services(
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
         channel_manager=channel_manager,
+        clouddisk=clouddisk,
         log=logger,
     )
     return GatewayServices(
@@ -90,4 +106,5 @@ def build_gateway_services(
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
         channel_manager=channel_manager,
+        clouddisk=clouddisk,
     )

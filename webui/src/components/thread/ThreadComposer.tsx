@@ -33,6 +33,7 @@ import {
   CornerDownRight,
   FileIcon,
   GripVertical,
+  HardDrive,
   History,
   ImageIcon,
   Info,
@@ -81,8 +82,10 @@ import {
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import { useElapsed } from "@/hooks/useElapsed";
+import { FileSelectorModal } from "@/components/clouddisk/FileSelectorModal";
 import type {
   CliAppInfo,
+  CloudDiskFileItem,
   GoalStateWsPayload,
   McpPresetInfo,
   OutboundCliAppMention,
@@ -643,6 +646,7 @@ export function ThreadComposer({
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
+  const [showCloudDiskModal, setShowCloudDiskModal] = useState(false);
   const isHero = variant === "hero";
   const hasActivePlan = !!(planState?.steps && planState.steps.length > 0);
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
@@ -1456,6 +1460,28 @@ export function ThreadComposer({
     addFiles(files);
   };
 
+  const handleCloudDiskSelect = useCallback(
+    (file: CloudDiskFileItem, content?: string) => {
+      if (content) {
+        setValue((current) => {
+          const sep = current.trim() ? "\n\n" : "";
+          return `${current}${sep}${content}`;
+        });
+      } else {
+        const ref = `[CloudDisk: ${file.path}]`;
+        setValue((current) => {
+          const sep = current.trim() ? " " : "";
+          return `${current}${sep}${ref}`;
+        });
+      }
+      setSlashMenuDismissed(false);
+      setCliAppMenuDismissed(false);
+      resizeTextarea();
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+    [resizeTextarea],
+  );
+
   const removeChip = useCallback(
     (id: string) => {
       const { nextFocusId } = remove(id);
@@ -1765,6 +1791,35 @@ export function ThreadComposer({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+            <TooltipProvider delayDuration={350} skipDelayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={disabled}
+                    aria-label={t("sidebar.clouddisk", { defaultValue: "CloudDisk" })}
+                    onClick={() => setShowCloudDiskModal(true)}
+                    className={cn(
+                      "rounded-full text-muted-foreground hover:text-foreground",
+                      isHero
+                        ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                        : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+                    )}
+                  >
+                    <HardDrive className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent
+                  side="top"
+                  align="center"
+                  className="max-w-[22rem] whitespace-pre-line rounded-xl border border-border/70 bg-background px-3 py-2 text-[12.5px] leading-relaxed text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-neutral-900 dark:text-white"
+                >
+                  {t("sidebar.clouddisk", { defaultValue: "CloudDisk" })}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -1884,6 +1939,11 @@ export function ThreadComposer({
           onChange={onWorkspaceScopeChange}
         />
       </div>
+      <FileSelectorModal
+        open={showCloudDiskModal}
+        onClose={() => setShowCloudDiskModal(false)}
+        onSelect={handleCloudDiskSelect}
+      />
     </form>
   );
 }

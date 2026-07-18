@@ -48,6 +48,18 @@ def get_webui_dir() -> Path:
     return get_runtime_subdir("webui")
 
 
+def get_clouddisk_dir() -> Path:
+    """Return the clouddisk root directory for this instance."""
+    return get_runtime_subdir("clouddisk")
+
+
+def ensure_clouddisk_dirs() -> Path:
+    """Return the clouddisk root, ensuring default folders exist."""
+    root = get_clouddisk_dir()
+    ensure_dir(root / "聊天归档")
+    return root
+
+
 def get_workspace_path(workspace: str | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
     path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"

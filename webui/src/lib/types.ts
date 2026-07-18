@@ -1034,3 +1034,38 @@ export type Outbound =
        * generic websocket protocol for other clients. */
       webui?: true;
     };
+
+// ---------------------------------------------------------------------------
+// CloudDisk
+// ---------------------------------------------------------------------------
+
+export interface CloudDiskFileItem {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size: number;
+  created_at: string;
+  source_session_id: string | null;
+}
+
+export interface CloudDiskListPayload {
+  folder: string;
+  files: CloudDiskFileItem[];
+}
+
+export interface CloudDiskQuotaPayload {
+  used_mb: number;
+  quota_mb: number;
+  file_count: number;
+}
+
+export interface CloudDiskUploadResult {
+  path: string;
+  name: string;
+  size: number;
+}
+
+export interface CloudDiskMoveResult {
+  from: string;
+  to: string;
+}

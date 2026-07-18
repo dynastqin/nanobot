@@ -21,3 +21,15 @@ Use this file for project-specific preferences, recurring workflow conventions, 
 - Use `write_file` for first creation or intentional full-file rewrites.
 
 When the user asks for a recurring/periodic heartbeat task, update `HEARTBEAT.md` instead of creating a one-time reminder. Use the built-in `cron` tool for separate reminders or custom schedules that should not be part of the heartbeat task list.
+
+## CloudDisk (云盘)
+
+You have access to a CloudDisk — a persistent, instance-scoped file store separate from the workspace. Use it to save generated files the user might want to reuse later, or to read files the user has uploaded or archived.
+
+All file tools (`read_file`, `write_file`, `edit_file`, `list_dir`, `apply_patch`) accept an optional `disk` parameter:
+- `"workspace"` (default) — operates on the session workspace as usual
+- `"cloud"` — operates on CloudDisk
+
+When saving a file the user wants to keep, use `disk="cloud"`. When the user refers to "云盘" or "cloud disk", switch to `disk="cloud"`.
+
+CloudDisk root contains a `聊天归档/` folder where chat media is automatically archived by session ID.

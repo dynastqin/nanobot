@@ -1,9 +1,11 @@
-import { useState, type ReactNode } from "react";
-import { FileIcon, ImageIcon, PlaySquare } from "lucide-react";
+import { useCallback, useState, type ReactNode } from "react";
+import { Check, FileIcon, HardDrive, ImageIcon, Loader2, PlaySquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import type { UIMediaAttachment } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
+import { uploadCloudDiskFile } from "@/lib/api";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
@@ -14,9 +16,81 @@ interface AttachmentTileProps {
 
 export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
   const { t } = useTranslation();
+  const { token } = useClient();
   const [failed, setFailed] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "success" | "error">("idle");
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
+
+  const handleSaveToCloudDisk = useCallback(async () => {
+    if (!hasUrl || saveState !== "idle") return;
+    setSaveState("saving");
+    try {
+      const res = await fetch(attachment.url!);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const filename = attachment.name || "file";
+      await uploadCloudDiskFile(token, "", filename, blob);
+      setSaveState("success");
+      setTimeout(() => setSaveState("idle"), 2000);
+    } catch {
+      setSaveState("error");
+      setTimeout(() => setSaveState("idle"), 2000);
+    }
+  }, [attachment.name, attachment.url, hasUrl, saveState, token]);
+
+  const frameSaveButton = hasUrl ? (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSaveToCloudDisk();
+      }}
+      disabled={saveState === "saving"}
+      className={cn(
+        "absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full",
+        "bg-background/80 backdrop-blur-sm opacity-0 transition-opacity",
+        "group-hover/attach:opacity-100",
+        "border border-border/50 shadow-sm",
+        saveState === "success" ? "text-emerald-500" : saveState === "error" ? "text-destructive" : "text-muted-foreground hover:text-foreground",
+      )}
+      aria-label={saveState === "success" ? "Saved" : saveState === "error" ? "Save failed" : "Save to CloudDisk"}
+    >
+      {saveState === "saving" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : saveState === "success" ? (
+        <Check className="h-3.5 w-3.5" />
+      ) : (
+        <HardDrive className="h-3.5 w-3.5" />
+      )}
+    </button>
+  ) : null;
+
+  const inlineSaveButton = hasUrl ? (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSaveToCloudDisk();
+      }}
+      disabled={saveState === "saving"}
+      className={cn(
+        "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors",
+        saveState === "success" ? "text-emerald-500" : saveState === "error" ? "text-destructive" : "text-muted-foreground/60 hover:text-foreground",
+      )}
+      aria-label={saveState === "success" ? "Saved" : saveState === "error" ? "Save failed" : "Save to CloudDisk"}
+    >
+      {saveState === "saving" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : saveState === "success" ? (
+        <Check className="h-3.5 w-3.5" />
+      ) : (
+        <HardDrive className="h-3.5 w-3.5" />
+      )}
+    </button>
+  ) : null;
 
   if (attachment.kind === "image" && hasUrl && !failed) {
     return (
@@ -25,6 +99,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         className={className}
         inline={inline}
         variant={variant}
+        saveButton={frameSaveButton}
       >
         <a
           href={attachment.url}
@@ -57,6 +132,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         className={className}
         inline={inline}
         variant={variant}
+        saveButton={frameSaveButton}
       >
         <video
           src={attachment.url}
@@ -86,21 +162,24 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
 
   if (hasUrl && !failed) {
     return (
-      <a
-        href={attachment.url}
-        download={attachment.name ?? label}
-        title={attachment.name ?? undefined}
-        aria-label={label}
-        className={cn(
-          "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
-          "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
-          "transition-colors hover:bg-muted/55 hover:text-foreground",
-          variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
-          className,
-        )}
-      >
-        {body}
-      </a>
+      <span className="group/attach inline-flex items-center gap-1.5">
+        <a
+          href={attachment.url}
+          download={attachment.name ?? label}
+          title={attachment.name ?? undefined}
+          aria-label={label}
+          className={cn(
+            "flex max-w-[18rem] items-center gap-2 rounded-[14px]",
+            "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
+            "transition-colors hover:bg-muted/55 hover:text-foreground",
+            variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
+            className,
+          )}
+        >
+          {body}
+        </a>
+        {inlineSaveButton}
+      </span>
     );
   }
 
@@ -129,12 +208,14 @@ function AttachmentFrame({
   className,
   inline = false,
   variant = "default",
+  saveButton,
 }: {
   attachment: UIMediaAttachment;
   children: ReactNode;
   className?: string;
   inline?: boolean;
   variant?: "default" | "compact";
+  saveButton?: ReactNode;
 }) {
   const frameClassName = cn(
     "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
@@ -143,6 +224,7 @@ function AttachmentFrame({
     attachment.kind === "video" ? "w-[min(100%,32rem)]" : "",
     variant === "compact" && "my-1 rounded-xl shadow-none",
     variant === "compact" && attachment.kind === "video" && "w-[min(100%,20rem)]",
+    "group/attach relative",
     className,
   );
   const bodyClassName = "block max-w-full";
@@ -154,10 +236,12 @@ function AttachmentFrame({
   return inline ? (
     <span className={frameClassName}>
       {body}
+      {saveButton}
     </span>
   ) : (
     <figure className={frameClassName}>
       {body}
+      {saveButton}
     </figure>
   );
 }

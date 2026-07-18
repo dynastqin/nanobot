@@ -178,6 +178,7 @@ class GatewayHTTPHandler:
         cron_service: CronService | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         channel_manager: Any | None = None,
+        clouddisk: Any | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -192,6 +193,7 @@ class GatewayHTTPHandler:
         self.disabled_skills = disabled_skills or set()
         self.cron_service = cron_service
         self.cron_pending_job_ids = cron_pending_job_ids
+        self.clouddisk = clouddisk
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -261,6 +263,11 @@ class GatewayHTTPHandler:
 
         # Media routes
         response = self._dispatch_media_routes(request, got)
+        if response is not None:
+            return response
+
+        # CloudDisk routes
+        response = self._dispatch_clouddisk_routes(request, got)
         if response is not None:
             return response
 
@@ -767,6 +774,138 @@ class GatewayHTTPHandler:
                 return self._handle_artifact_fetch(token, request, view_source=view_source)
             return _http_error(400, "missing token")
         return None
+
+    # -- CloudDisk routes ---------------------------------------------------
+
+    def _dispatch_clouddisk_routes(
+        self, request: WsRequest, got: str
+    ) -> Response | None:
+        if self.clouddisk is None:
+            return None
+        # quota
+        if got == "/api/clouddisk/quota":
+            return self._handle_clouddisk_quota(request)
+        # list
+        m = re.match(r"^/api/clouddisk/list$", got)
+        if m:
+            return self._handle_clouddisk_list(request)
+        # info
+        m = re.match(r"^/api/clouddisk/info$", got)
+        if m:
+            return self._handle_clouddisk_info(request)
+        # download
+        m = re.match(r"^/api/clouddisk/download$", got)
+        if m:
+            return self._handle_clouddisk_download(request)
+        # upload
+        m = re.match(r"^/api/clouddisk/upload$", got)
+        if m:
+            return self._handle_clouddisk_upload(request)
+        # delete
+        m = re.match(r"^/api/clouddisk/delete$", got)
+        if m:
+            return self._handle_clouddisk_delete(request)
+        # move
+        m = re.match(r"^/api/clouddisk/move$", got)
+        if m:
+            return self._handle_clouddisk_move(request)
+        return None
+
+    def _handle_clouddisk_quota(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = self.clouddisk.ops.quota()
+        return _http_json_response(q)
+
+    def _handle_clouddisk_list(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = _parse_query(request.path)
+        folder = _query_first(q, "folder") or ""
+        files = self.clouddisk.ops.list_dir(folder)
+        return _http_json_response({"folder": folder, "files": files})
+
+    def _handle_clouddisk_info(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = _parse_query(request.path)
+        path = _query_first(q, "path") or ""
+        if not path:
+            return _http_error(400, "missing path")
+        info = self.clouddisk.ops.info(path)
+        if info is None:
+            return _http_error(404, "not found")
+        return _http_json_response(info)
+
+    def _handle_clouddisk_download(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = _parse_query(request.path)
+        path = _query_first(q, "path") or ""
+        if not path:
+            return _http_error(400, "missing path")
+        result = self.clouddisk.ops.download(path)
+        if result is None:
+            return _http_error(404, "not found")
+        data, filename, mime = result
+        return _http_response(
+            data,
+            content_type=mime,
+            extra_headers=[
+                ("Content-Disposition", f'attachment; filename="{filename}"'),
+                ("X-Content-Type-Options", "nosniff"),
+            ],
+        )
+
+    async def _handle_clouddisk_upload(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = _parse_query(request.path)
+        folder = _query_first(q, "folder") or ""
+        filename = _query_first(q, "filename") or "uploaded_file"
+        try:
+            body = await request.body
+        except Exception:
+            body = b""
+        if not body:
+            return _http_error(400, "empty body")
+        try:
+            result = self.clouddisk.ops.upload(folder, filename, body)
+        except ValueError as e:
+            return _http_error(413, str(e))
+        except PermissionError as e:
+            return _http_error(403, str(e))
+        return _http_json_response(result)
+
+    def _handle_clouddisk_delete(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = _parse_query(request.path)
+        path = _query_first(q, "path") or ""
+        if not path:
+            return _http_error(400, "missing path")
+        ok = self.clouddisk.ops.delete(path)
+        if not ok:
+            return _http_error(404, "not found")
+        return _http_json_response({"deleted": True})
+
+    def _handle_clouddisk_move(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        q = _parse_query(request.path)
+        from_path = _query_first(q, "from") or ""
+        to_path = _query_first(q, "to") or ""
+        if not from_path or not to_path:
+            return _http_error(400, "missing from/to")
+        try:
+            result = self.clouddisk.ops.move(from_path, to_path)
+        except FileExistsError as e:
+            return _http_error(409, str(e))
+        except PermissionError as e:
+            return _http_error(403, str(e))
+        if result is None:
+            return _http_error(404, "not found")
+        return _http_json_response(result)
 
     def _handle_media_fetch(
         self, sig: str, payload: str, request: WsRequest | None = None

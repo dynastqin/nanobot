@@ -51,6 +51,7 @@ class _FsTool(Tool):
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
+        clouddisk_root: Path | None = None,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
@@ -68,6 +69,7 @@ class _FsTool(Tool):
             else allowed_dir is not None
         )
         self._sandbox_restricts_workspace = sandbox_restricts_workspace
+        self._clouddisk_root = clouddisk_root
         # Explicit state is used by isolated runners like Dream/subagents.
         # Main AgentLoop tools leave this unset and resolve state from the
         # current async task, which keeps shared tool instances session-safe.
@@ -85,6 +87,16 @@ class _FsTool(Tool):
         sandbox_restricts = bool(ctx.config.exec.sandbox)
         allowed_dir = Path(ctx.workspace) if restrict else None
         extra_read = [BUILTIN_SKILLS_DIR]
+
+        clouddisk_root = None
+        try:
+            cd = getattr(ctx.config, "clouddisk", None)
+            if cd is not None and cd.enabled:
+                from nanobot.config.paths import get_clouddisk_dir
+                clouddisk_root = get_clouddisk_dir()
+        except Exception:
+            pass
+
         return cls(
             workspace=Path(ctx.workspace),
             allowed_dir=allowed_dir,
@@ -92,6 +104,7 @@ class _FsTool(Tool):
             file_states=ctx.file_state_store,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             sandbox_restricts_workspace=sandbox_restricts,
+            clouddisk_root=clouddisk_root,
         )
 
     @property
@@ -134,7 +147,10 @@ class _FsTool(Tool):
             include_media_dir=include_media_dir,
         )
 
-    def _resolve_read(self, path: str) -> Path:
+    def _resolve_read(self, path: str, disk: str = "workspace") -> Path:
+        if disk == "cloud" and self._clouddisk_root is not None:
+            from nanobot.agent.tools.path_utils import resolve_clouddisk_path
+            return resolve_clouddisk_path(path, self._clouddisk_root)
         return self._resolve_with_extra(
             path,
             self._extra_read_allowed_dirs,
@@ -142,7 +158,10 @@ class _FsTool(Tool):
             include_media_dir=True,
         )
 
-    def _resolve_write(self, path: str) -> Path:
+    def _resolve_write(self, path: str, disk: str = "workspace") -> Path:
+        if disk == "cloud" and self._clouddisk_root is not None:
+            from nanobot.agent.tools.path_utils import resolve_clouddisk_path
+            return resolve_clouddisk_path(path, self._clouddisk_root)
         return self._resolve_with_extra(
             path,
             self._extra_write_allowed_dirs,
@@ -150,8 +169,8 @@ class _FsTool(Tool):
             include_media_dir=False,
         )
 
-    def _resolve(self, path: str) -> Path:
-        return self._resolve_read(path)
+    def _resolve(self, path: str, disk: str = "workspace") -> Path:
+        return self._resolve_read(path, disk)
 
     def _display_workspace(self) -> Path | None:
         return current_tool_workspace(self._workspace).project_path
@@ -223,6 +242,11 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
             description="Bypass same-file read deduplication and return content again.",
             default=False,
         ),
+        disk=StringSchema(
+            "workspace",
+            description='Which disk to read from: "workspace" (default) or "cloud" (CloudDisk)',
+            enum=["workspace", "cloud"],
+        ),
         required=["path"],
     )
 )
@@ -274,7 +298,7 @@ class ReadFileTool(_FsTool):
             if _is_blocked_device(path):
                 return f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
 
-            fp = self._resolve_read(path)
+            fp = self._resolve_read(path, kwargs.get("disk", "workspace"))
             if _is_blocked_device(fp):
                 return f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
             if not fp.exists():
@@ -460,6 +484,11 @@ class ReadFileTool(_FsTool):
     tool_parameters_schema(
         path=StringSchema("The file path to write to"),
         content=StringSchema("The content to write"),
+        disk=StringSchema(
+            "workspace",
+            description='Which disk to write to: "workspace" (default) or "cloud" (CloudDisk)',
+            enum=["workspace", "cloud"],
+        ),
         required=["path", "content"],
     )
 )
@@ -486,7 +515,8 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
-            fp = self._resolve_write(path)
+            disk = kwargs.get("disk", "workspace")
+            fp = self._resolve_write(path, disk)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
             self._file_states.record_write(fp)
@@ -785,6 +815,11 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
             minimum=1,
             nullable=True,
         ),
+        disk=StringSchema(
+            "workspace",
+            description='Which disk to edit: "workspace" (default) or "cloud" (CloudDisk)',
+            enum=["workspace", "cloud"],
+        ),
         required=["path", "old_text", "new_text"],
     )
 )
@@ -836,7 +871,7 @@ class EditFileTool(_FsTool):
             if expected_replacements is not None and expected_replacements < 1:
                 return "Error: expected_replacements must be >= 1."
 
-            fp = self._resolve_write(path)
+            fp = self._resolve_write(path, kwargs.get("disk", "workspace"))
 
             # Create-file semantics: old_text='' + file doesn't exist → create
             if not fp.exists():
@@ -1012,6 +1047,11 @@ class EditFileTool(_FsTool):
             description="Maximum entries to return (default 200)",
             minimum=1,
         ),
+        disk=StringSchema(
+            "workspace",
+            description='Which disk to list: "workspace" (default) or "cloud" (CloudDisk)',
+            enum=["workspace", "cloud"],
+        ),
         required=["path"],
     )
 )
@@ -1049,7 +1089,7 @@ class ListDirTool(_FsTool):
         try:
             if path is None:
                 raise ValueError("Unknown path")
-            dp = self._resolve(path)
+            dp = self._resolve(path, kwargs.get("disk", "workspace"))
             if not dp.exists():
                 return f"Error: Directory not found: {path}"
             if not dp.is_dir():

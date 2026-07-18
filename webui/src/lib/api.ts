@@ -3,6 +3,10 @@ import type {
   AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
+  CloudDiskListPayload,
+  CloudDiskMoveResult,
+  CloudDiskQuotaPayload,
+  CloudDiskUploadResult,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
@@ -983,5 +987,81 @@ export async function createArtifactShare(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CloudDisk
+// ---------------------------------------------------------------------------
+
+export function cloudDiskDownloadUrl(path: string, base: string = ""): string {
+  return `${base}/api/clouddisk/download?path=${encodeURIComponent(path)}`;
+}
+
+export async function fetchCloudDiskList(
+  token: string,
+  folder: string = "",
+  base: string = "",
+): Promise<CloudDiskListPayload> {
+  const q = folder ? `?folder=${encodeURIComponent(folder)}` : "";
+  return request<CloudDiskListPayload>(
+    `${base}/api/clouddisk/list${q}`, token, undefined, API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function uploadCloudDiskFile(
+  token: string,
+  folder: string,
+  filename: string,
+  data: Blob,
+  base: string = "",
+): Promise<CloudDiskUploadResult> {
+  const q = new URLSearchParams();
+  q.set("folder", folder);
+  q.set("filename", filename);
+  const res = await fetchWithTimeout(`${base}/api/clouddisk/upload?${q}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: data,
+  });
+  if (!res.ok) throw new ApiError(res.status, (await res.text()).trim() || `HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function deleteCloudDiskFile(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<{ deleted: boolean }> {
+  return request(`${base}/api/clouddisk/delete?path=${encodeURIComponent(path)}`, token);
+}
+
+export async function moveCloudDiskFile(
+  token: string,
+  from: string,
+  to: string,
+  base: string = "",
+): Promise<CloudDiskMoveResult> {
+  const q = new URLSearchParams();
+  q.set("from", from);
+  q.set("to", to);
+  return request(`${base}/api/clouddisk/move?${q}`, token);
+}
+
+export async function fetchCloudDiskInfo(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<Record<string, unknown>> {
+  return request(`${base}/api/clouddisk/info?path=${encodeURIComponent(path)}`, token,
+    undefined, API_READ_TIMEOUT_MS);
+}
+
+export async function fetchCloudDiskQuota(
+  token: string,
+  base: string = "",
+): Promise<CloudDiskQuotaPayload> {
+  return request<CloudDiskQuotaPayload>(
+    `${base}/api/clouddisk/quota`, token, undefined, API_READ_TIMEOUT_MS,
   );
 }

@@ -43,6 +43,7 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CloudDiskView } from "@/components/clouddisk/CloudDiskView";
 import { fetchSettings, fetchWorkspaces, createFolder, renameFolder, deleteFolder, moveSession } from "@/lib/api";
 import {
   createRuntimeHost,
@@ -73,7 +74,7 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "clouddisk";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -137,6 +138,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
+  }
+  if (path === "/clouddisk") {
+    return { view: "clouddisk", activeKey, settingsSection: "overview" };
   }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
@@ -1296,6 +1300,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenCloudDisk = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "clouddisk", activeKey, settingsSection: "overview" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
@@ -1477,6 +1487,12 @@ function Shell({
       });
       return;
     }
+    if (view === "clouddisk") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("sidebar.clouddisk", { defaultValue: "CloudDisk" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -1499,8 +1515,9 @@ function Shell({
     onOpenApps,
     onOpenAutomations,
     onOpenSkills,
+    onOpenCloudDisk,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
+    activeUtility: view === "apps" || view === "automations" || view === "skills" || view === "clouddisk" ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -1699,7 +1716,7 @@ function Shell({
                 skills={skills}
               />
             </div>
-            {view !== "chat" && (
+            {view !== "chat" && view !== "clouddisk" && (
               <div className="absolute inset-0 flex flex-col">
                 <SettingsView
                   theme={theme}
@@ -1719,6 +1736,11 @@ function Shell({
                   isRestarting={isRestarting}
                   hostChromeInset={showHostChrome}
                 />
+              </div>
+            )}
+            {view === "clouddisk" && (
+              <div className="absolute inset-0 flex flex-col">
+                <CloudDiskView />
               </div>
             )}
           </main>

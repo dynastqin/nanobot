@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { AlertCircle, ChevronRight, Code2, Eye, FileText, Loader2, Minimize2, X } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Code2, Eye, FileText, HardDrive, Loader2, Minimize2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
 import { ArtifactShareButton } from "@/components/ArtifactShareButton";
 import { splitFilePath } from "@/components/FileReferenceChip";
-import { ApiError, fetchFilePreview, type ArtifactShareResult } from "@/lib/api";
+import { ApiError, fetchFilePreview, uploadCloudDiskFile, type ArtifactShareResult } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 import { cn } from "@/lib/utils";
 
 interface FilePreviewPanelProps {
@@ -44,10 +45,46 @@ export function FilePreviewPanel({
   initialShare,
 }: FilePreviewPanelProps) {
   const { t } = useTranslation();
+  const { token: clientToken } = useClient();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [entered, setEntered] = useState(false);
   const [supportsHoverClose, setSupportsHoverClose] = useState(supportsHoverCloseControl);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [saveName, setSaveName] = useState("");
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const saveInputRef = useRef<HTMLInputElement>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSaveToCloudDisk = useCallback(async () => {
+    if (state.status !== "ready") return;
+    const filename = saveName.trim() || name;
+    setSaveState("saving");
+    try {
+      const blob = new Blob([state.payload.content], { type: "application/octet-stream" });
+      await uploadCloudDiskFile(clientToken, "", filename, blob);
+      setSaveState("success");
+      saveTimeoutRef.current = setTimeout(() => {
+        setSaveState("idle");
+        setShowSaveInput(false);
+      }, 2000);
+    } catch {
+      setSaveState("error");
+      saveTimeoutRef.current = setTimeout(() => setSaveState("idle"), 2000);
+    }
+  }, [clientToken, name, saveName, state]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (showSaveInput) {
+      requestAnimationFrame(() => saveInputRef.current?.focus());
+    }
+  }, [showSaveInput]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -273,22 +310,76 @@ export function FilePreviewPanel({
                   <span className="truncate">{previewPath}</span>
                 )}
               </div>
-              {state.status === "ready" && isRenderableFile(state.payload.language) && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode(viewMode === "preview" ? "source" : "preview")}
-                  className={cn(
-                    "ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                    "text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground",
-                  )}
-                  aria-label={viewMode === "preview" ? t("filePreview.viewSource") : t("filePreview.viewPreview")}
-                >
-                  {viewMode === "preview" ? (
-                    <Code2 className="h-3.5 w-3.5" />
+              {state.status === "ready" && (
+                <div className="ml-auto flex items-center gap-0.5">
+                  {showSaveInput ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        ref={saveInputRef}
+                        type="text"
+                        value={saveName}
+                        placeholder={name}
+                        onChange={(e) => setSaveName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveToCloudDisk();
+                          if (e.key === "Escape") {
+                            setShowSaveInput(false);
+                            setSaveName("");
+                          }
+                        }}
+                        className="h-7 w-36 rounded-md border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveToCloudDisk}
+                        disabled={saveState === "saving"}
+                        className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >
+                        {saveState === "saving" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          t("sidebar.clouddisk", { defaultValue: "Save" })
+                        )}
+                      </button>
+                    </div>
                   ) : (
-                    <Eye className="h-3.5 w-3.5" />
+                    <button
+                      type="button"
+                      onClick={() => setShowSaveInput(true)}
+                      className={cn(
+                        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                        "text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground",
+                        saveState === "success" && "text-emerald-500",
+                        saveState === "error" && "text-destructive",
+                      )}
+                      aria-label={t("sidebar.clouddisk", { defaultValue: "Save to CloudDisk" })}
+                      title={saveState === "success" ? "Saved!" : saveState === "error" ? "Save failed" : "Save to CloudDisk"}
+                    >
+                      {saveState === "success" ? (
+                        <Check className="h-3.5 w-3.5" />
+                      ) : (
+                        <HardDrive className="h-3.5 w-3.5" />
+                      )}
+                    </button>
                   )}
-                </button>
+                  {isRenderableFile(state.payload.language) && (
+                    <button
+                      type="button"
+                      onClick={() => setViewMode(viewMode === "preview" ? "source" : "preview")}
+                      className={cn(
+                        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                        "text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground",
+                      )}
+                      aria-label={viewMode === "preview" ? t("filePreview.viewSource") : t("filePreview.viewPreview")}
+                    >
+                      {viewMode === "preview" ? (
+                        <Code2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
+                </div>
               )}
               {path.includes("outputs/") && (
                 <ArtifactShareButton

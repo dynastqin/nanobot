@@ -116,6 +116,11 @@ def _format_summary(summary: _PatchSummary) -> str:
             description="Validate and summarize the patch without writing files.",
             default=False,
         ),
+        disk=StringSchema(
+            "workspace",
+            description='Which disk to apply patch to: "workspace" (default) or "cloud" (CloudDisk)',
+            enum=["workspace", "cloud"],
+        ),
         required=["edits"],
     )
 )
@@ -161,7 +166,7 @@ class ApplyPatchTool(_FsTool):
                 action = edit.get("action")
                 if not isinstance(action, str):
                     raise _PatchError(f"action required for edit: {path}")
-                source = self._resolve_write(path)
+                source = self._resolve_write(path, kwargs.get("disk", "workspace"))
 
                 if action == "add":
                     new_text = edit.get("new_text")

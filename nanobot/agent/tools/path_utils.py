@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import get_clouddisk_dir, get_media_dir
 from nanobot.security.workspace_policy import (
     is_path_within,
     resolve_allowed_path,
@@ -32,3 +32,14 @@ def resolve_workspace_path(
         extra_allowed_roots=extra_roots,
         extra_allowed_files=extra_allowed_files,
     )
+
+
+def resolve_clouddisk_path(path: str, clouddisk_root: Path) -> Path:
+    """Resolve *path* relative to *clouddisk_root* with boundary enforcement."""
+    cleaned = path.lstrip("/")
+    resolved = (clouddisk_root / cleaned).resolve()
+    try:
+        resolved.relative_to(clouddisk_root.resolve())
+    except ValueError:
+        raise PermissionError(f"Path {path!r} is outside clouddisk root")
+    return resolved

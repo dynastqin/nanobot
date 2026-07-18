@@ -3,6 +3,7 @@ import {
   Archive,
   Brain,
   CalendarClock,
+  HardDrive,
   Menu,
   Search,
   Settings,
@@ -38,8 +39,9 @@ interface SidebarProps {
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
+  onOpenCloudDisk?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "clouddisk" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -194,6 +196,15 @@ export function Sidebar(props: SidebarProps) {
           active={props.activeUtility === "automations"}
           icon={<CalendarClock className="h-4 w-4" />}
         />
+        {props.onOpenCloudDisk && (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.clouddisk", { defaultValue: "CloudDisk" })}
+            onClick={props.onOpenCloudDisk}
+            active={props.activeUtility === "clouddisk"}
+            icon={<HardDrive className="h-4 w-4" />}
+          />
+        )}
         {props.archivedCount ? (
           <SidebarActionButton
             collapsed={collapsed}
