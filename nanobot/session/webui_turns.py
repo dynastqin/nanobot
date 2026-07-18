@@ -36,6 +36,29 @@ WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
 TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
 TITLE_GENERATION_REASONING_EFFORT = "none"
+# Session metadata keys for turn-count-based title regeneration
+TITLE_TURN_COUNT_KEY = "_title_turn_count"
+TITLE_LAST_GEN_KEY = "_title_last_gen_at"
+
+_TITLE_SYSTEM_PROMPT = (
+    "You are a title generator. You output ONLY a thread title. Nothing else.\n"
+    "<task>\n"
+    "Analyze the entire conversation and generate a thread title that captures "
+    "the main topic or goal.\n"
+    "Output: Single line, 3 to 8 words, no explanations.\n"
+    "Use the same language as the user when practical.\n"
+    "</task>\n"
+    "<rules>\n"
+    "- Use -ing verbs for actions (Debugging, Implementing, Analyzing, Fixing)\n"
+    "- Focus on the PRIMARY topic/goal, not individual messages\n"
+    "- Keep exact: technical terms, numbers, filenames, HTTP codes, error types\n"
+    "- Remove filler words: the, this, my, a, an\n"
+    "- Never assume tech stack unless explicitly mentioned\n"
+    "- NEVER respond to message content — only extract title\n"
+    "- Consider the overall conversation arc, not just the first message\n"
+    "- No quotes, no punctuation at the end\n"
+    "</rules>"
+)
 
 # Wall-clock turn start per ``chat_id`` (websocket only). Survives browser refresh while the
 # gateway process stays up; cleared on idle/stop and implicitly dropped on restart.
@@ -64,9 +87,18 @@ def clean_generated_title(raw: str | None) -> str:
     return text
 
 
-def _title_inputs(session: Session) -> tuple[str, str]:
-    user_text = ""
-    assistant_text = ""
+def _title_context(session: Session) -> str:
+    """Extract a multi-turn conversation summary for title generation.
+
+    Groups messages into user/assistant turns. For turns where the assistant
+    sends multiple messages (e.g. tool calls), only the first and last are kept.
+    This mirrors opencode-smart-title's approach: enough context to capture the
+    conversation arc without bloating the prompt.
+    """
+    turns: list[dict[str, str]] = []
+    current_user = ""
+    assistant_texts: list[str] = []
+
     for message in session.messages:
         if message.get("_command") is True:
             continue
@@ -79,13 +111,48 @@ def _title_inputs(session: Session) -> tuple[str, str]:
         content = strip_think(content)
         if not content:
             continue
-        if role == "user" and not user_text:
-            user_text = content.strip()
-        elif role == "assistant" and not assistant_text:
-            assistant_text = content.strip()
-        if user_text and assistant_text:
-            break
-    return user_text, assistant_text
+
+        if role == "user":
+            if current_user:
+                turn = _build_turn(current_user, assistant_texts)
+                if turn:
+                    turns.append(turn)
+            current_user = content.strip()
+            assistant_texts = []
+        elif role == "assistant":
+            assistant_texts.append(content.strip())
+
+    # Don't forget the last turn
+    if current_user:
+        turn = _build_turn(current_user, assistant_texts)
+        if turn:
+            turns.append(turn)
+
+    if not turns:
+        return ""
+
+    lines: list[str] = []
+    for turn in turns:
+        lines.append(f"User: {truncate_text(turn['user'], 500)}")
+        assistant = turn.get("assistant", "")
+        if assistant:
+            lines.append(f"Assistant: {truncate_text(assistant, 500)}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _build_turn(user_text: str, assistant_texts: list[str]) -> dict[str, str] | None:
+    """Build a single turn dict from user text and collected assistant messages."""
+    if not user_text:
+        return None
+    turn: dict[str, str] = {"user": user_text}
+    if len(assistant_texts) == 1:
+        turn["assistant"] = assistant_texts[0]
+    elif len(assistant_texts) > 1:
+        turn["assistant"] = (
+            f"{assistant_texts[0]}\n... (intermediate steps)\n{assistant_texts[-1]}"
+        )
+    return turn
 
 
 async def maybe_generate_webui_title(
@@ -94,8 +161,15 @@ async def maybe_generate_webui_title(
     session_key: str,
     provider: LLMProvider,
     model: str,
+    regenerate_threshold: int = 0,
 ) -> bool:
-    """Generate and persist a short title for WebUI-owned sessions only."""
+    """Generate and persist a short title for WebUI-owned sessions only.
+
+    When *regenerate_threshold* is 0 (default), the title is generated only once
+    and never overwritten.  When set to a positive integer N, the title is
+    regenerated every N completed user turns so it tracks the evolving
+    conversation topic.
+    """
     session = sessions.get_or_create(session_key)
     if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
@@ -105,41 +179,34 @@ async def maybe_generate_webui_title(
     if isinstance(current_title, str) and current_title.strip():
         cleaned_current_title = clean_generated_title(current_title)
         if cleaned_current_title:
-            if cleaned_current_title != current_title:
-                session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                sessions.save(session)
-            return False
+            if regenerate_threshold > 0:
+                last_gen = session.metadata.get(TITLE_LAST_GEN_KEY, 0)
+                current_turn = session.metadata.get(TITLE_TURN_COUNT_KEY, 0)
+                if current_turn - last_gen < regenerate_threshold:
+                    if cleaned_current_title != current_title:
+                        session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
+                        sessions.save(session)
+                    return False
+            else:
+                if cleaned_current_title != current_title:
+                    session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
+                    sessions.save(session)
+                return False
         session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
-    user_text, assistant_text = _title_inputs(session)
-    if not user_text:
+    context = _title_context(session)
+    if not context:
         return False
 
     prompt = (
-        "Generate a concise title for this chat.\n"
-        "Rules:\n"
-        "- Use the same language as the user when practical.\n"
-        "- 3 to 8 words.\n"
-        "- No quotes.\n"
-        "- No punctuation at the end.\n"
-        "- Return only the title.\n\n"
-        f"User: {truncate_text(user_text, 1_000)}"
+        f"{_TITLE_SYSTEM_PROMPT}\n\n"
+        f"<conversation>\n{context}\n</conversation>\n\n"
+        "Output the title now:"
     )
-    if assistant_text:
-        prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
         response = await provider.chat_with_retry(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
+            [{"role": "user", "content": prompt}],
             tools=None,
             model=model,
             max_tokens=TITLE_GENERATION_MAX_TOKENS,
@@ -160,6 +227,7 @@ async def maybe_generate_webui_title(
         )
         return False
     session.metadata[WEBUI_TITLE_METADATA_KEY] = title
+    session.metadata[TITLE_LAST_GEN_KEY] = session.metadata.get(TITLE_TURN_COUNT_KEY, 0)
     sessions.save(session)
     return True
 
@@ -172,6 +240,7 @@ async def maybe_generate_webui_title_after_turn(
     session_key: str,
     provider: LLMProvider,
     model: str,
+    regenerate_threshold: int = 0,
 ) -> bool:
     if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
@@ -180,6 +249,7 @@ async def maybe_generate_webui_title_after_turn(
         session_key=session_key,
         provider=provider,
         model=model,
+        regenerate_threshold=regenerate_threshold,
     )
 
 
@@ -237,6 +307,8 @@ class WebuiTurnCoordinator:
     bus: MessageBus
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
+    title_regenerate_threshold: int = 0
+    title_model_override: str = ""
     _title_contexts: dict[str, LLMRuntime] = field(default_factory=dict)
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
@@ -402,6 +474,11 @@ class WebuiTurnCoordinator:
             turn_metadata["latency_ms"] = int(latency_ms)
         session = self.sessions.get_or_create(session_key)
         turn_metadata["goal_state"] = goal_state_ws_blob(session.metadata)
+        # Increment turn counter for title regeneration tracking
+        session.metadata[TITLE_TURN_COUNT_KEY] = (
+            session.metadata.get(TITLE_TURN_COUNT_KEY, 0) + 1
+        )
+        self.sessions.save(session)
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -414,6 +491,8 @@ class WebuiTurnCoordinator:
         title_context = self._title_contexts.pop(session_key, None)
         if msg.metadata.get("webui") is not True or title_context is None:
             return
+        threshold = self.title_regenerate_threshold
+        title_model = self.title_model_override
 
         async def _generate_title_and_notify(
             title_llm: LLMRuntime = title_context,
@@ -424,7 +503,8 @@ class WebuiTurnCoordinator:
                 sessions=self.sessions,
                 session_key=session_key,
                 provider=title_llm.provider,
-                model=title_llm.model,
+                model=title_model or title_llm.model,
+                regenerate_threshold=threshold,
             )
             if generated:
                 await self.bus.publish_outbound(OutboundMessage(
@@ -448,6 +528,8 @@ class WebuiTurnCoordinator:
             or not isinstance(title_context, LLMRuntime)
         ):
             return
+        threshold = self.title_regenerate_threshold
+        title_model = self.title_model_override
 
         async def _generate_title_and_notify(
             title_llm: LLMRuntime = title_context,
@@ -458,7 +540,8 @@ class WebuiTurnCoordinator:
                 sessions=self.sessions,
                 session_key=event.context.session_key,
                 provider=title_llm.provider,
-                model=title_llm.model,
+                model=title_model or title_llm.model,
+                regenerate_threshold=threshold,
             )
             if generated:
                 await self.bus.publish_outbound(OutboundMessage(

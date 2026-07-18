@@ -282,12 +282,39 @@ class ApiConfig(Base):
     timeout: float = 120.0  # Per-request timeout in seconds.
 
 
+class TitleGenerationConfig(Base):
+    """Smart title generation settings (WebUI sessions only)."""
+
+    model: str = Field(
+        default="",
+        description=(
+            "Optional model override for title generation. When empty, uses the "
+            "session's current model. Set to a cheaper/faster model to reduce cost, "
+            "e.g. 'claude-haiku-4-5'."
+        ),
+    )
+    update_threshold: int = Field(
+        default=0,
+        alias=AliasChoices("updateThreshold", "update_threshold"),
+        ge=0,
+        description=(
+            "Regenerate session title every N completed turns. "
+            "0 disables regeneration (title is generated once on first turn only). "
+            "1 regenerates after every turn."
+        ),
+    )
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    title_generation: TitleGenerationConfig = Field(
+        default_factory=TitleGenerationConfig,
+        alias=AliasChoices("titleGeneration", "title_generation"),
+    )
 
 
 class MCPServerConfig(Base):

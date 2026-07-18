@@ -857,10 +857,13 @@ def _run_gateway(
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
     )
+    title_gen = getattr(config.gateway, "title_generation", None)
     WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
+        title_regenerate_threshold=getattr(title_gen, "update_threshold", 0) if title_gen else 0,
+        title_model_override=getattr(title_gen, "model", "") if title_gen else "",
     ).subscribe(runtime_events)
 
     from nanobot.bus.events import OutboundMessage
