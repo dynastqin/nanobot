@@ -44,6 +44,16 @@ class AgentRunHookContext:
     exception: BaseException | None = None
 
 
+@dataclass(slots=True)
+class TurnEndHookContext:
+    """Snapshot exposed to hooks at turn end (after SAVE, before RESPOND)."""
+
+    session_key: str | None = None
+    stop_reason: str | None = None
+    error: str | None = None
+    tools_used: list[str] = field(default_factory=list)
+
+
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
 
@@ -63,6 +73,14 @@ class AgentHook:
         pass
 
     async def on_finally(self, context: AgentRunHookContext) -> None:
+        pass
+
+    async def on_turn_end(self, context: TurnEndHookContext) -> None:
+        """Called after runner finishes, before context vars are reset.
+
+        This is the correct place to drain cleanup registries — the
+        runner's work is done but session context is still available.
+        """
         pass
 
     async def before_iteration(self, context: AgentHookContext) -> None:
@@ -155,6 +173,9 @@ class CompositeHook(AgentHook):
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("after_iteration", context)
+
+    async def on_turn_end(self, context: TurnEndHookContext) -> None:
+        await self._for_each_hook_safe("on_turn_end", context)
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         for h in self._hooks:

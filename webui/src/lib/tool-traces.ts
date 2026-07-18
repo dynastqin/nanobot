@@ -37,7 +37,10 @@ export function formatToolCallTrace(call: unknown): string | null {
   if (!name) return null;
   const args = item.function?.arguments ?? item.arguments;
   if (typeof args === "string" && args.trim()) return `${name}(${args})`;
-  if (args && typeof args === "object") return `${name}(${JSON.stringify(args)})`;
+  if (args && typeof args === "object") {
+    if (Object.keys(args as Record<string, unknown>).length === 0) return `${name}()`;
+    return `${name}(${JSON.stringify(args)})`;
+  }
   return `${name}()`;
 }
 

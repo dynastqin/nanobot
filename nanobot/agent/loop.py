@@ -19,9 +19,11 @@ from loguru import logger
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.agent.cleanup import bind_cleanup_registry, reset_cleanup_registry
+from nanobot.agent.cleanup_hook import CleanupHook
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
-from nanobot.agent.hook import AgentHook, CompositeHook
+from nanobot.agent.hook import AgentHook, CompositeHook, TurnEndHookContext
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
@@ -754,7 +756,7 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
-        run_hooks = [*self._extra_hooks, *(hooks or [])]
+        run_hooks = [*self._extra_hooks, CleanupHook(), *(hooks or [])]
         hook: AgentHook = loop_hook
         if run_hooks and (not ephemeral or run_extra_hooks_for_ephemeral):
             hook = CompositeHook([loop_hook, *run_hooks])
@@ -849,6 +851,7 @@ class AgentLoop:
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
+        cleanup_token = bind_cleanup_registry()
         # Compute lazily because long_task may create goal metadata during this run.
         def _goal_continue() -> str | None:
             _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
@@ -862,6 +865,7 @@ class AgentLoop:
             )
 
         session_metadata = session.metadata if session is not None else None
+        result = None
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -899,9 +903,24 @@ class AgentLoop:
                 ),
             ))
         finally:
+            # Fire on_turn_end before resetting context vars so cleanup
+            # callbacks can access request context / workspace scope.
+            turn_end_ctx = TurnEndHookContext(
+                session_key=active_session_key,
+                stop_reason=result.stop_reason if result is not None else "error",
+                error=result.error if result is not None else None,
+            )
+            try:
+                await hook.on_turn_end(turn_end_ctx)
+            except Exception:
+                logger.exception("AgentHook.on_turn_end error")
+
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
             reset_file_states(file_state_token)
+            reset_cleanup_registry(cleanup_token)
+        if result is None:
+            raise RuntimeError("Agent runner returned None")
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)

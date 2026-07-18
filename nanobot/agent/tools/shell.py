@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 from pydantic import Field
 
+from nanobot.agent.cleanup import register_cleanup
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.exec_session import (
@@ -339,6 +340,28 @@ class ExecTool(Tool):
                     MAX_OUTPUT_CHARS,
                 ),
             )
+
+            captured_session_id = session_id
+
+            async def _cleanup_session() -> None:
+                try:
+                    logger.info(f"tool [exec · hook] Cleaning up exec session,session_id={captured_session_id}")
+                    await self._session_manager.write(
+                        session_id=captured_session_id,
+                        chars=None,
+                        close_stdin=False,
+                        terminate=True,
+                        yield_time_ms=0,
+                        max_output_chars=1000,
+                        owner_session_key=current_request_session_key(),
+                    )
+                except KeyError:
+                    pass
+                except Exception:
+                    logger.debug("Auto-cleanup of exec session failed", exc_info=True)
+
+            register_cleanup(_cleanup_session)
+
             return format_session_poll(session_id, poll)
         except Exception as exc:
             return f"Error executing command: {exc}"
