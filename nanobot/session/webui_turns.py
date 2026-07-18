@@ -34,7 +34,7 @@ WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
 WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
 TITLE_MAX_CHARS = 60
-TITLE_GENERATION_MAX_TOKENS = 96
+TITLE_GENERATION_MAX_TOKENS = 1024
 TITLE_GENERATION_REASONING_EFFORT = "none"
 # Session metadata keys for turn-count-based title regeneration
 TITLE_TURN_COUNT_KEY = "_title_turn_count"
@@ -219,6 +219,12 @@ async def maybe_generate_webui_title(
         return False
 
     title = clean_generated_title(response.content)
+    if response.finish_reason == "length":
+        logger.warning(
+            "WebUI title generation was truncated for {} (max_tokens={})",
+            session_key,
+            TITLE_GENERATION_MAX_TOKENS,
+        )
     if not title or title.lower().startswith("error"):
         logger.debug(
             "WebUI title generation returned no usable title for {} (finish_reason={})",
