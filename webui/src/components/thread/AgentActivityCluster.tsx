@@ -1132,13 +1132,11 @@ function TraceIconMark({
     <FallbackIcon
       className={cn(
         "h-3.5 w-3.5 shrink-0",
-        trace.error
-          ? "text-red-500/80"
-          : trace.kind === "done"
-            ? "text-emerald-500/75"
-            : active
-              ? "text-muted-foreground/75"
-              : "text-muted-foreground/45",
+        trace.kind === "done"
+          ? "text-emerald-500/75"
+          : active
+            ? "text-muted-foreground/75"
+            : "text-muted-foreground/45",
       )}
       aria-hidden
     />
@@ -1174,6 +1172,20 @@ function previewToolEventDetail(event?: ToolProgressEvent): string {
     parts.push(truncateMiddle(title, 60));
   }
   return parts.join(": ");
+}
+
+function previewGenericArgs(event?: ToolProgressEvent): string {
+  if (!event) return "";
+  const args = parseToolEventArguments(event);
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "";
+  const record = args as Record<string, unknown>;
+  const values: string[] = [];
+  for (const value of Object.values(record)) {
+    const p = previewScalar(value);
+    if (p !== null) values.push(truncateMiddle(String(p), 80));
+    if (values.length >= 3) break;
+  }
+  return values.join(", ");
 }
 
 function toolEventHasError(event?: ToolProgressEvent): boolean {
@@ -1245,7 +1257,7 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
     };
   }
   if (name) {
-    const argsDetail = previewToolEventDetail(toolEvent);
+    const argsDetail = previewToolEventDetail(toolEvent) || previewGenericArgs(toolEvent);
     return { kind: "tool", label: "Using", detail: argsDetail ? `${name}(${argsDetail})` : name, error: errored };
   }
   if (/done|complete|success/i.test(trimmed)) {
@@ -1459,7 +1471,8 @@ function parseCliRunTrace(line: string, status: CliRunStatus = "running"): CliRu
   return cliRunFromArguments(argsObject, { key: line, status });
 }
 
-function parseToolEventArguments(event: ToolProgressEvent): unknown {
+function parseToolEventArguments(event?: ToolProgressEvent): unknown {
+  if (!event) return {};
   const fnArgs = (event as { function?: { arguments?: unknown } }).function?.arguments;
   const raw = fnArgs ?? event.arguments;
   if (typeof raw !== "string") return raw ?? {};

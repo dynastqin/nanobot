@@ -607,3 +607,18 @@ class ListExecSessionsTool(Tool):
             return "\n".join(lines)
         except Exception as exc:
             return f"Error listing exec sessions: {exc}"
+    @property
+    def pid(self) -> int | None:
+        """Return the PID of the managed subprocess (None if never spawned)."""
+        return self.process.pid
+    async def get_pid(self, session_id: str) -> int | None:
+        """Look up the subprocess PID for *session_id* without modifying state.
+
+        Returns ``None`` when the session is unknown or has already been
+        removed (e.g. after a previous ``terminate`` call).
+        """
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return None
+            return session.pid

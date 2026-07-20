@@ -19,7 +19,6 @@ import { ArtifactCard } from "@/components/ArtifactCard";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
 import {
-  FileReferenceChip,
   isFilePatternReference,
   isLikelyFilePath,
 } from "@/components/FileReferenceChip";

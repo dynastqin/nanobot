@@ -6,6 +6,7 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -346,6 +347,10 @@ class ExecTool(Tool):
             async def _cleanup_session() -> None:
                 try:
                     logger.info(f"tool [exec · hook] Cleaning up exec session,session_id={captured_session_id}")
+                    # Snapshot the PID *before* terminate so we can issue a
+                    # process-group kill afterwards even when the session has
+                    # already been popped.
+                    pid = await self._session_manager.get_pid(captured_session_id)
                     await self._session_manager.write(
                         session_id=captured_session_id,
                         chars=None,
@@ -356,9 +361,18 @@ class ExecTool(Tool):
                         owner_session_key=current_request_session_key(),
                     )
                 except KeyError:
-                    pass
+                    pid = None
                 except Exception:
                     logger.debug("Auto-cleanup of exec session failed", exc_info=True)
+                    pid = None
+                # Belt-and-suspenders: killpg the whole process group so
+                # orphaned grandchildren (e.g. workers spawned by exec'd
+                # servers) cannot outlive the parent and keep ports bound.
+                if pid is not None:
+                    try:
+                        os.killpg(os.getpgid(pid), signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        pass  # already dead — nothing to do
 
             register_cleanup(_cleanup_session)
 

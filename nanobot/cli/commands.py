@@ -862,7 +862,7 @@ def _run_gateway(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
-        title_regenerate_threshold=getattr(title_gen, "update_threshold", 0) if title_gen else 0,
+        title_regenerate_threshold=getattr(title_gen, "update_threshold", 1) if title_gen else 1,
         title_model_override=getattr(title_gen, "model", "") if title_gen else "",
     ).subscribe(runtime_events)
 
