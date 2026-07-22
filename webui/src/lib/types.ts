@@ -258,6 +258,7 @@ export interface ChatSummary {
   chatId: string;
   createdAt: string | null;
   updatedAt: string | null;
+  lastActiveAt?: string | null;
   title?: string;
   preview: string;
   /** Unix epoch seconds when this session currently has a turn in flight. */

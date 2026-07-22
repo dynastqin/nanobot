@@ -783,9 +783,10 @@ class Consolidator:
 
     def _persist_last_summary(self, session: Session, summary: str | None) -> None:
         if summary and summary != "(nothing)":
+            last_active = session.last_active_at or session.updated_at
             session.metadata["_last_summary"] = {
                 "text": summary,
-                "last_active": session.updated_at.isoformat(),
+                "last_active": last_active.isoformat(),
             }
             self.sessions.save(session)
 
@@ -1008,7 +1009,6 @@ class Consolidator:
 
             messages_to_summarize = list(session.messages[session.last_consolidated:])
             if not messages_to_summarize:
-                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -1025,11 +1025,10 @@ class Consolidator:
             messages_to_remove = dropped[already_consolidated:]
 
             if not messages_to_remove and not messages_to_keep:
-                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
-            last_active = session.updated_at
+            last_active = session.last_active_at or session.updated_at
             summary: str | None = ""
             if messages_to_remove:
                 # Summarize the retained suffix too, but only remove/raw-dump
@@ -1048,7 +1047,6 @@ class Consolidator:
 
             session.messages = messages_to_keep
             session.last_consolidated = 0
-            session.updated_at = datetime.now()
             self.sessions.save(session)
 
             if messages_to_remove:

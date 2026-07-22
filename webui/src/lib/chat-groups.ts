@@ -85,8 +85,22 @@ export function groupSessions(
 
   const groups: SessionGroup[] = [];
 
-  // Add regular folder groups (sorted by folder order), above Chats
-  for (const folder of regularFolders) {
+  // Add regular folder groups (sorted by latest session activity), above Chats
+  const sortedRegularFolders = regularFolders
+    .map((folder) => {
+      const bucket = folderBuckets.get(folder.id) ?? [];
+      let bestTime = 0;
+      for (const s of bucket) {
+        const t = sessionTime(s, "lastActiveAt");
+        if (t > bestTime) bestTime = t;
+      }
+      return { folder, bestTime };
+    })
+    .sort((a, b) => {
+      if (b.bestTime !== a.bestTime) return b.bestTime - a.bestTime;
+      return a.folder.name.localeCompare(b.folder.name, "en", { numeric: true, sensitivity: "base" });
+    });
+  for (const { folder } of sortedRegularFolders) {
     const bucket = folderBuckets.get(folder.id) ?? [];
     const sorted = sortFolderSessions(bucket, options.sort, options.titleOverrides, pinned);
     groups.push({
@@ -267,7 +281,7 @@ function groupSessionsByProject(
       updatedAt: null,
     };
     bucket.sessions.push(session);
-    const candidate = session.updatedAt ?? session.createdAt ?? null;
+    const candidate = session.lastActiveAt ?? session.updatedAt ?? session.createdAt ?? null;
     if (isNewerDate(candidate, bucket.updatedAt)) {
       bucket.updatedAt = candidate;
     }
@@ -294,7 +308,7 @@ function groupSessionsByProject(
   if (conversations.length) {
     const chatsUpdatedAt = conversations.reduce<string | null>(
       (best, s) => {
-        const candidate = s.updatedAt ?? s.createdAt ?? null;
+        const candidate = s.lastActiveAt ?? s.updatedAt ?? s.createdAt ?? null;
         return isNewerDate(candidate, best) ? candidate : best;
       },
       null,
@@ -321,7 +335,21 @@ function groupSessionsByProject(
         }
       }
 
-      for (const folder of regularFolders) {
+      const sortedRegularFolders = regularFolders
+        .map((folder) => {
+          const bucket = folderBuckets.get(folder.id) ?? [];
+          let bestTime = 0;
+          for (const s of bucket) {
+            const t = sessionTime(s, "lastActiveAt");
+            if (t > bestTime) bestTime = t;
+          }
+          return { folder, bestTime };
+        })
+        .sort((a, b) => {
+          if (b.bestTime !== a.bestTime) return b.bestTime - a.bestTime;
+          return a.folder.name.localeCompare(b.folder.name, "en", { numeric: true, sensitivity: "base" });
+        });
+      for (const { folder } of sortedRegularFolders) {
         const bucket = folderBuckets.get(folder.id) ?? [];
         groups.push({
           id: `folder:${folder.id}`,
@@ -456,10 +484,10 @@ function sortSessions(
         { numeric: true, sensitivity: "base" },
       );
       if (titleOrder !== 0) return titleOrder;
-      return sessionTime(b, "updatedAt") - sessionTime(a, "updatedAt");
+      return sessionTime(b, "lastActiveAt") - sessionTime(a, "lastActiveAt");
     }
-    const aTime = sessionTime(a, sort === "created_desc" ? "createdAt" : "updatedAt");
-    const bTime = sessionTime(b, sort === "created_desc" ? "createdAt" : "updatedAt");
+    const aTime = sessionTime(a, sort === "created_desc" ? "createdAt" : "lastActiveAt");
+    const bTime = sessionTime(b, sort === "created_desc" ? "createdAt" : "lastActiveAt");
     return bTime - aTime;
   });
   return copy;
@@ -485,7 +513,10 @@ function titleForSort(
   ).toLocaleLowerCase("en");
 }
 
-function sessionTime(session: ChatSummary, field: "createdAt" | "updatedAt"): number {
-  const ts = Date.parse(session[field] ?? "");
+function sessionTime(session: ChatSummary, field: "createdAt" | "updatedAt" | "lastActiveAt"): number {
+  const value = field === "lastActiveAt"
+    ? (session.lastActiveAt ?? session.updatedAt ?? session.createdAt)
+    : session[field];
+  const ts = Date.parse(value ?? "");
   return Number.isFinite(ts) ? ts : 0;
 }

@@ -108,6 +108,7 @@ export async function listSessions(
     key: string;
     created_at: string | null;
     updated_at: string | null;
+    last_active_at: string | null;
     title?: string;
     preview?: string;
     run_started_at?: number | null;
@@ -125,6 +126,7 @@ export async function listSessions(
     ...splitKey(s.key),
     createdAt: s.created_at,
     updatedAt: s.updated_at,
+    lastActiveAt: s.last_active_at ?? s.updated_at,
     title: s.title ?? "",
     preview: s.preview ?? "",
     runStartedAt: s.run_started_at ?? null,

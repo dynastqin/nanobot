@@ -330,6 +330,7 @@ function FilesTab({
   const [previewError, setPreviewError] = useState(false);
   const [previewUnsupported, setPreviewUnsupported] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pathCopied, setPathCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Latest pending auto-open request. Updated on every click, consumed when the
@@ -523,6 +524,22 @@ function FilesTab({
     }
   }, [preview]);
 
+  const displayPath = useMemo(() => {
+    if (!selectedPath) return "";
+    return "/" + selectedPath.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+  }, [selectedPath]);
+
+  const handleCopyPath = useCallback(async () => {
+    if (!selectedPath) return;
+    try {
+      await navigator.clipboard.writeText(selectedPath);
+      setPathCopied(true);
+      setTimeout(() => setPathCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  }, [selectedPath]);
+
   const handleDownload = useCallback(async () => {
     if (!selectedPath) return;
     if (preview) {
@@ -601,7 +618,21 @@ function FilesTab({
           >
             <PanelRight className="h-3.5 w-3.5" />
           </Button>
-          <div className="flex-1" />
+          <div className="flex min-w-0 flex-1 items-center gap-2 px-1">
+            <button
+              type="button"
+              className="min-w-0 truncate text-[13px] text-muted-foreground/70 hover:text-foreground cursor-pointer"
+              title={displayPath}
+              onClick={handleCopyPath}
+            >
+              <span className="truncate">{displayPath}</span>
+            </button>
+            {pathCopied && (
+              <span className="shrink-0 text-[11px] text-emerald-500 animate-in fade-in-0">
+                ✓ {t("thread.sessionInfo.files.pathCopied", { defaultValue: "copied" })}
+              </span>
+            )}
+          </div>
           {preview && isRenderableFile(preview.language) && (
             <Button
               variant="ghost"

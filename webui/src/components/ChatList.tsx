@@ -302,7 +302,7 @@ export const ChatList = memo(function ChatList({
     const preview = s.preview.trim();
     const showPreview = showPreviews && preview && preview !== title;
     const timestamp = showTimestamps
-      ? relativeTime(s.updatedAt ?? s.createdAt)
+      ? relativeTime(s.lastActiveAt ?? s.updatedAt ?? s.createdAt)
       : "";
     const projectMode = group.kind === "project";
     const folderMode = group.kind === "folder";

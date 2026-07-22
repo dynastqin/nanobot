@@ -40,7 +40,7 @@ def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]
         except Exception as e:
             logger.debug("Failed to write WebUI session list index: {}", e)
     sessions = [_public_row(session_manager.sessions_dir, row) for row in rows]
-    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
+    return sorted(sessions, key=lambda row: row.get("last_active_at") or row.get("updated_at", ""), reverse=True)
 
 
 def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
@@ -112,6 +112,8 @@ def _file_signature(path: Path) -> dict[str, int]:
 def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
     if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
         return False
+    if not isinstance(row.get("last_active_at"), (str, type(None))):
+        return False
     if not isinstance(row.get("title", ""), str) or not isinstance(row.get("preview", ""), str):
         return False
     if row.get("file") != path.name:
@@ -134,6 +136,7 @@ def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
         "key": row.get("key"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
+        "last_active_at": row.get("last_active_at"),
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
         "path": str(sessions_dir / str(row.get("file", ""))),
@@ -198,6 +201,7 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
         "key": session.key,
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
+        "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         "file": path.name,
@@ -251,6 +255,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 "key": key,
                 "created_at": data.get("created_at"),
                 "updated_at": data.get("updated_at"),
+                "last_active_at": data.get("last_active_at"),
                 "title": _metadata_title(data.get("metadata", {})),
                 "preview": preview or fallback_preview,
                 "file": path.name,

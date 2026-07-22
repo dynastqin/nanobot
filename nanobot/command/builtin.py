@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
-
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from nanobot import __version__
+from nanobot.agent.tools.plan import _safe_filename
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.runtime_events import PlanStateChanged, RuntimeEventContext
 from nanobot.command.router import CommandContext, CommandRouter
-from nanobot.utils.helpers import build_status_content
+from nanobot.utils.helpers import _write_text_atomic, build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 
 
@@ -133,11 +137,49 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     msg = ctx.msg
     total = await loop._cancel_active_tasks(ctx.key)
+
+    # Update active plan so the UI stops showing spinners for running steps.
+    _stop_active_plan(loop, msg, ctx.key)
+
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
         metadata=dict(msg.metadata or {})
     )
+
+
+def _stop_active_plan(loop: Any, msg: OutboundMessage, session_key: str) -> None:
+    """Mark all active plan steps as blocked and emit PlanStateChanged."""
+    try:
+        plans_dir = Path(loop.workspace) / "memory" / "plans"
+        plan_path = plans_dir / f"{_safe_filename(session_key)}.json"
+        if not plan_path.exists():
+            return
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        steps = plan.get("steps", [])
+        if not any(s.get("status") == "active" for s in steps):
+            return
+        for s in steps:
+            if s.get("status") == "active":
+                s["status"] = "blocked"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        plan["completed"] = now
+        plan["updated"] = now
+        _write_text_atomic(plan_path, json.dumps(plan, indent=2, ensure_ascii=False))
+        runtime_events = getattr(loop, "runtime_events", None)
+        if runtime_events is not None:
+            runtime_events.publish_nowait(
+                PlanStateChanged(
+                    context=RuntimeEventContext(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        session_key=session_key,
+                    ),
+                    plan=plan,
+                )
+            )
+    except Exception:
+        pass
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:

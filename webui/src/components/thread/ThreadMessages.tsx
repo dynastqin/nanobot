@@ -1,12 +1,19 @@
-import { Fragment, type ReactNode, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Archive, ChevronDown } from "lucide-react";
+import { Archive, Check, ChevronDown, Copy } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatMessageTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { CliAppInfo, CompactionInfo, McpPresetInfo, Role, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
@@ -69,12 +76,57 @@ export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
   return flags;
 }
 
+function UserMessageCopyButton({ content }: { content: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const label = copied ? t("message.copiedReply") : t("message.copyReply");
+
+  const onClick = () => {
+    void copyTextToClipboard(content).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => {
+        setCopied(false);
+        timerRef.current = null;
+      }, 1_500);
+    });
+  };
+
+  return (
+    <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted/55 hover:text-foreground"
+          >
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface MessageRowProps {
   role: Role;
   /** First message timestamp (epoch ms) for the unit. */
   timestamp: number | undefined;
   showAvatar?: boolean;
   showTimestamp?: boolean;
+  copyAction?: ReactNode;
   className?: string;
   children: ReactNode;
 }
@@ -84,6 +136,7 @@ function MessageRow({
   timestamp,
   showAvatar = true,
   showTimestamp = true,
+  copyAction,
   className,
   children,
 }: MessageRowProps) {
@@ -107,13 +160,13 @@ function MessageRow({
         )}
       >
         {children}
-        {showTimestamp && timeLabel ? (
-          <span
-            className="mt-1 text-[11px] leading-none text-muted-foreground tabular-nums"
-            title={timeLabel}
-          >
-            {timeLabel}
-          </span>
+        {(showTimestamp && timeLabel) || copyAction ? (
+          <div className="mt-1 flex items-center gap-x-1.5 text-[11px] leading-none text-muted-foreground">
+            {copyAction}
+            {showTimestamp && timeLabel ? (
+              <span className="tabular-nums" title={timeLabel}>{timeLabel}</span>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -244,6 +297,11 @@ export function ThreadMessages({
                   timestamp={unit.message.createdAt}
                   showAvatar={showAvatar}
                   showTimestamp={showTimestamp}
+                  copyAction={
+                    unit.message.role === "user" && unit.message.content.trim()
+                      ? <UserMessageCopyButton content={unit.message.content} />
+                      : undefined
+                  }
                 >
                   <MessageBubble
                     message={unit.message}

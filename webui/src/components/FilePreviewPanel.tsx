@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { AlertCircle, ChevronRight, Code2, Eye, FileText, Loader2, Minimize2, X } from "lucide-react";
+import { AlertCircle, Code2, Eye, FileText, Loader2, Minimize2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
@@ -48,6 +48,7 @@ export function FilePreviewPanel({
   const [entered, setEntered] = useState(false);
   const [supportsHoverClose, setSupportsHoverClose] = useState(supportsHoverCloseControl);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const [pathCopied, setPathCopied] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -94,17 +95,19 @@ export function FilePreviewPanel({
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
   const previewPath = state.status === "ready" ? state.payload.path : displayPath;
   const normalizedPreviewPath = previewPath.replace(/\\/g, "/");
-  const hasRootPrefix = normalizedPreviewPath.startsWith("/");
   const { name } = splitFilePath(displayPath);
-  const breadcrumbs = useMemo(
-    () => normalizedPreviewPath.split("/").filter(Boolean),
-    [normalizedPreviewPath],
-  );
-  const compactBreadcrumbs = useMemo(
-    () => (breadcrumbs.length > 2 ? breadcrumbs.slice(-2) : breadcrumbs),
-    [breadcrumbs],
-  );
-  const hasCompactPrefix = breadcrumbs.length > compactBreadcrumbs.length;
+
+  const displayFullPath = "/" + normalizedPreviewPath.split("/").filter(Boolean).join("/");
+
+  const handleCopyPath = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(previewPath);
+      setPathCopied(true);
+      setTimeout(() => setPathCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  }, [previewPath]);
 
   return (
     <aside
@@ -237,40 +240,24 @@ export function FilePreviewPanel({
           <div className="flex min-h-0 flex-1 flex-col">
             <div
               className={cn(
-                "flex min-h-10 shrink-0 items-center gap-1.5 overflow-hidden",
+                "flex min-h-10 shrink-0 items-center gap-1.5",
                 "border-b border-border/45 px-4 text-[13px] text-muted-foreground",
               )}
               title={previewPath}
             >
-              <div className="flex min-w-0 items-center gap-1.5">
-                {hasCompactPrefix ? (
-                  <span className="shrink-0 text-muted-foreground/55">...</span>
-                ) : hasRootPrefix ? (
-                  <span className="shrink-0 text-muted-foreground/55">/</span>
-                ) : null}
-                {compactBreadcrumbs.length > 0 ? (
-                  compactBreadcrumbs.map((part, index) => (
-                    <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-1.5">
-                      {index > 0 || hasCompactPrefix || hasRootPrefix ? (
-                        <ChevronRight
-                          className="h-3 w-3 shrink-0 text-muted-foreground/40"
-                          aria-hidden
-                        />
-                      ) : null}
-                      <span
-                        className={cn(
-                          "min-w-0 truncate",
-                          index === compactBreadcrumbs.length - 1
-                            ? "font-medium text-foreground"
-                            : "max-w-[42vw] shrink text-muted-foreground/76",
-                        )}
-                      >
-                        {part}
-                      </span>
-                    </span>
-                  ))
-                ) : (
-                  <span className="truncate">{previewPath}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="min-w-0 truncate text-[13px] text-muted-foreground/70 hover:text-foreground cursor-pointer"
+                  title={displayFullPath}
+                  onClick={handleCopyPath}
+                >
+                  {displayFullPath}
+                </button>
+                {pathCopied && (
+                  <span className="shrink-0 text-[11px] text-emerald-500 animate-in fade-in-0">
+                    ✓ {t("filePreview.pathCopied", { defaultValue: "copied" })}
+                  </span>
                 )}
               </div>
               {state.status === "ready" && isRenderableFile(state.payload.language) && (

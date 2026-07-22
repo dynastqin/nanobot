@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Code2, Copy, Download, Eye, Loader2, Minimize2, CircleAlert, Check, ChevronRight } from "lucide-react";
+import { Code2, Copy, Download, Eye, Loader2, Minimize2, CircleAlert, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ArtifactShareButton } from "@/components/ArtifactShareButton";
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { FilePreviewContent, isRenderableFile, type ViewMode } from "@/components/FilePreviewContent";
 import { ApiError, fetchFilePreview, type ArtifactShareResult } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 interface FileFullscreenPreviewProps {
   sessionKey: string;
@@ -32,6 +31,7 @@ export function FileFullscreenPreview({
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [copied, setCopied] = useState(false);
+  const [pathCopied, setPathCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
 
   useEffect(() => {
@@ -74,28 +74,37 @@ export function FileFullscreenPreview({
   }, [path, state]);
 
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
-  const normalizedPath = displayPath.replace(/\\/g, "/");
-  const breadcrumbs = normalizedPath.split("/").filter(Boolean);
+  const displayFullPath = "/" + displayPath.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+
+  const handleCopyPath = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(displayPath);
+      setPathCopied(true);
+      setTimeout(() => setPathCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  }, [displayPath]);
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-background animate-in fade-in-0 duration-200">
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 h-12">
         {/* Breadcrumbs */}
-        <div className="flex min-w-0 flex-1 items-center gap-1 text-[13px] text-muted-foreground">
-          {breadcrumbs.map((part, index) => (
-            <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-1">
-              {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />}
-              <span className={cn(
-                "truncate",
-                index === breadcrumbs.length - 1
-                  ? "font-medium text-foreground"
-                  : "text-muted-foreground/70 max-w-[30vw] shrink",
-              )}>
-                {part}
-              </span>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <button
+            type="button"
+            className="min-w-0 truncate text-[13px] text-muted-foreground/70 hover:text-foreground cursor-pointer"
+            title={displayFullPath}
+            onClick={handleCopyPath}
+          >
+            {displayFullPath}
+          </button>
+          {pathCopied && (
+            <span className="shrink-0 text-[11px] text-emerald-500 animate-in fade-in-0">
+              ✓ {t("filePreview.pathCopied", { defaultValue: "copied" })}
             </span>
-          ))}
+          )}
         </div>
 
         {/* Actions */}

@@ -107,6 +107,7 @@ class Session:
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    last_active_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
@@ -148,6 +149,7 @@ class Session:
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
+        self.last_active_at = datetime.now()
 
     def get_history(
         self,
@@ -476,6 +478,7 @@ class SessionManager:
             metadata = {}
             created_at = None
             updated_at = None
+            last_active_at = None
             last_consolidated = 0
 
             with open(path, encoding="utf-8") as f:
@@ -490,6 +493,8 @@ class SessionManager:
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
+                        la_raw = data.get("last_active_at")
+                        last_active_at = datetime.fromisoformat(la_raw) if la_raw else None
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -499,6 +504,7 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
+                last_active_at=last_active_at,
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
@@ -520,6 +526,7 @@ class SessionManager:
             metadata: dict[str, Any] = {}
             created_at: datetime | None = None
             updated_at: datetime | None = None
+            last_active_at: datetime | None = None
             last_consolidated = 0
             skipped = 0
 
@@ -542,6 +549,10 @@ class SessionManager:
                         if data.get("updated_at"):
                             with suppress(ValueError, TypeError):
                                 updated_at = datetime.fromisoformat(data["updated_at"])
+                        la_raw = data.get("last_active_at")
+                        if la_raw:
+                            with suppress(ValueError, TypeError):
+                                last_active_at = datetime.fromisoformat(la_raw)
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -557,6 +568,7 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
+                last_active_at=last_active_at,
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
@@ -570,6 +582,7 @@ class SessionManager:
             "key": session.key,
             "created_at": session.created_at.isoformat(),
             "updated_at": session.updated_at.isoformat(),
+            "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
             "metadata": session.metadata,
             "messages": session.messages,
         }
@@ -594,6 +607,7 @@ class SessionManager:
                     "key": session.key,
                     "created_at": session.created_at.isoformat(),
                     "updated_at": session.updated_at.isoformat(),
+                    "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
                     "metadata": session.metadata,
                     "last_consolidated": session.last_consolidated
                 }
@@ -717,6 +731,7 @@ class SessionManager:
             messages=copied,
             created_at=now,
             updated_at=now,
+            last_active_at=None,
             metadata=metadata,
             last_consolidated=last_consolidated,
         )
@@ -737,6 +752,7 @@ class SessionManager:
             metadata: dict[str, Any] = {}
             created_at: str | None = None
             updated_at: str | None = None
+            last_active_at: str | None = None
             stored_key: str | None = None
             last_consolidated: int = 0
             with open(path, encoding="utf-8") as f:
@@ -749,6 +765,7 @@ class SessionManager:
                         metadata = data.get("metadata", {})
                         created_at = data.get("created_at")
                         updated_at = data.get("updated_at")
+                        last_active_at = data.get("last_active_at")
                         stored_key = data.get("key")
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
@@ -757,6 +774,7 @@ class SessionManager:
                 "key": stored_key or key,
                 "created_at": created_at,
                 "updated_at": updated_at,
+                "last_active_at": last_active_at,
                 "metadata": metadata,
                 "messages": messages,
                 "last_consolidated": last_consolidated,
@@ -792,6 +810,7 @@ class SessionManager:
                         "key": data.get("key") or key,
                         "created_at": data.get("created_at"),
                         "updated_at": data.get("updated_at"),
+                        "last_active_at": data.get("last_active_at"),
                         "metadata": metadata if isinstance(metadata, dict) else {},
                     }
             return None
@@ -804,6 +823,7 @@ class SessionManager:
                     "key": repaired.key,
                     "created_at": repaired.created_at.isoformat(),
                     "updated_at": repaired.updated_at.isoformat(),
+                    "last_active_at": repaired.last_active_at.isoformat() if repaired.last_active_at else None,
                     "metadata": repaired.metadata,
                 }
             return None
@@ -860,6 +880,7 @@ class SessionManager:
                                     "key": key,
                                     "created_at": data.get("created_at"),
                                     "updated_at": data.get("updated_at"),
+                                    "last_active_at": data.get("last_active_at"),
                                     "title": title,
                                     "preview": preview,
                                     "path": str(path),
@@ -873,6 +894,7 @@ class SessionManager:
                             "key": repaired.key,
                             "created_at": repaired.created_at.isoformat(),
                             "updated_at": repaired.updated_at.isoformat(),
+                            "last_active_at": repaired.last_active_at.isoformat() if repaired.last_active_at else None,
                             "title": _metadata_title(repaired.metadata),
                             "preview": next(
                                 (
