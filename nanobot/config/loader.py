@@ -45,6 +45,7 @@ def load_config(config_path: Path | None = None) -> Config:
         _schema_refs_ready = True
 
     path = config_path or get_config_path()
+    set_config_path(path)
 
     config = Config()
     if path.exists():

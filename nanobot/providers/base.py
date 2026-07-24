@@ -658,7 +658,7 @@ class LLMProvider(ABC):
             kwargs.get("reasoning_effort"),
             kwargs.get("tool_choice"),
         )
-        logger.info("[LLM {} Request] messages={}", tag, messages)
+        logger.info("[LLM {} Request] messages={}", tag, json.dumps(messages,ensure_ascii=False))
         if tools:
             tool_names = [
                 t["function"]["name"] if "function" in t else t.get("name", "?")
