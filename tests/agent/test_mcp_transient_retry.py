@@ -238,7 +238,7 @@ async def test_tool_retry_on_end_of_stream():
 
 @pytest.mark.asyncio
 async def test_tool_reconnects_when_transient_retry_reveals_terminated_session():
-    """Tool should reconnect if a stale session reports termination after transient retry."""
+    """Tool should reconnect immediately when a dead-transport error (ClosedResourceError) occurs."""
     old_session = AsyncMock()
     old_session.call_tool = AsyncMock(
         side_effect=[_FakeClosedResourceError("closed"), _session_terminated_error()]
@@ -261,7 +261,8 @@ async def test_tool_reconnects_when_transient_retry_reveals_terminated_session()
         output = await wrapper.execute(foo="bar")
 
     assert output == "fresh"
-    assert old_session.call_tool.call_count == 2
+    # ClosedResourceError triggers immediate session refresh — no wasteful transient retry
+    assert old_session.call_tool.call_count == 1
     assert new_session.call_tool.call_count == 1
 
 

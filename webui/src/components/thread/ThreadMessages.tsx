@@ -109,9 +109,9 @@ function UserMessageCopyButton({ content }: { content: string }) {
             type="button"
             onClick={onClick}
             aria-label={label}
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted/55 hover:text-foreground"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" align="center">{label}</TooltipContent>

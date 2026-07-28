@@ -431,6 +431,14 @@ export class NanobotClient {
     });
   }
 
+  sendAnswer(questionId: string, answers: Record<string, string>): void {
+    this.queueSend({
+      type: "answer_question",
+      question_id: questionId,
+      answers,
+    });
+  }
+
   // -- internals ---------------------------------------------------------
 
   private setStatus(status: ConnectionStatus): void {

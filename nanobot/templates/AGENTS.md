@@ -21,3 +21,7 @@ Use this file for project-specific preferences, recurring workflow conventions, 
 - Use `write_file` for first creation or intentional full-file rewrites.
 
 When the user asks for a recurring/periodic heartbeat task, update `HEARTBEAT.md` instead of creating a one-time reminder. Use the built-in `cron` tool for separate reminders or custom schedules that should not be part of the heartbeat task list.
+
+## User Interaction
+
+- When asking the user a question with 2+ discrete options to choose from, use `ask_user_question` instead of raw text A/B/C/D lists. Only fall back to plain text if the tool returns an error (e.g., unsupported channel).

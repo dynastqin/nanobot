@@ -821,32 +821,32 @@ async def connect_mcp_servers(
                         ", ".join(available_raw_names) or "(none)",
                         ", ".join(available_wrapped_names) or "(none)",
                     )
+            # TODO: 现在mcp基本不使用resources和prompts了
+            # try:
+            #     resources_result = await session.list_resources()
+            #     for resource in resources_result.resources:
+            #         wrapper = MCPResourceWrapper(
+            #             session, name, resource, resource_timeout=cfg.tool_timeout
+            #         )
+            #         registry.register(wrapper)
+            #         registered_count += 1
+            #         logger.debug(
+            #             "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+            #         )
+            # except Exception as e:
+            #     logger.warning("MCP server '{}': resources not supported or failed: {}", name, e)
 
-            try:
-                resources_result = await session.list_resources()
-                for resource in resources_result.resources:
-                    wrapper = MCPResourceWrapper(
-                        session, name, resource, resource_timeout=cfg.tool_timeout
-                    )
-                    registry.register(wrapper)
-                    registered_count += 1
-                    logger.debug(
-                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
-                    )
-            except Exception as e:
-                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
-
-            try:
-                prompts_result = await session.list_prompts()
-                for prompt in prompts_result.prompts:
-                    wrapper = MCPPromptWrapper(
-                        session, name, prompt, prompt_timeout=cfg.tool_timeout
-                    )
-                    registry.register(wrapper)
-                    registered_count += 1
-                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
-            except Exception as e:
-                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+            # try:
+            #     prompts_result = await session.list_prompts()
+            #     for prompt in prompts_result.prompts:
+            #         wrapper = MCPPromptWrapper(
+            #             session, name, prompt, prompt_timeout=cfg.tool_timeout
+            #         )
+            #         registry.register(wrapper)
+            #         registered_count += 1
+            #         logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
+            # except Exception as e:
+            #     logger.warning("MCP server '{}': prompts not supported or failed: {}", name, e)
 
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count
@@ -871,6 +871,7 @@ async def connect_mcp_servers(
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
             logger.warning("MCP server '{}': failed to connect: {}{}", name, e, hint)
+            logger.error("MCP server '{}': connection error traceback:", name, exc_info=True)
             await _safe_aclose(server_stack)
             return name, None
 
@@ -1287,6 +1288,6 @@ async def _close_server(state: Any, server_name: str) -> None:
     if stack is None:
         return
     try:
-        await stack.aclose()
-    except (RuntimeError, BaseExceptionGroup):
-        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+        await asyncio.wait_for(stack.aclose(), timeout=10.0)
+    except (RuntimeError, BaseExceptionGroup, TimeoutError):
+        logger.warn("MCP server '{}' cleanup error (can be ignored)", server_name)

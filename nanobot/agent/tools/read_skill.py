@@ -85,7 +85,9 @@ class ReadSkillTool(Tool):
                 resolved_path = candidate
                 break
 
+        skill_dir = None
         if resolved_path is not None:
+            skill_dir = str(resolved_path.parent)
             entry = self._file_states.get(resolved_path)
             try:
                 current_mtime = os.path.getmtime(resolved_path)
@@ -108,4 +110,6 @@ class ReadSkillTool(Tool):
             self._file_states.record_read(resolved_path)
 
         logger.info(f"load skill({skill}) ok from [{resolved_path}]")
+        if skill_dir:
+            return f"[Skill directory: {skill_dir}]\n\n{content}"
         return content

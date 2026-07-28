@@ -33,6 +33,7 @@ import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
 import { extractSkillName, formatToolCallTrace, isSkillLoadEvent } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
 import { hasToolCallDetails, ToolCallDetailContent } from "@/components/thread/activity/ToolCallDetail";
+import { AskUserQuestionCard } from "@/components/thread/activity/AskUserQuestionCard";
 import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
 export { isAgentActivityMember, isReasoningOnlyAssistant };
@@ -207,7 +208,7 @@ export function ReasoningBlock({
                 onOpenLink={onOpenLink}
                 disableArtifactCard
                 className={cn(
-                  "min-w-0 text-[12.5px] italic text-muted-foreground/78",
+                  "min-w-0 text-[12.5px] italic text-muted-foreground/55",
                   "prose-p:my-1 prose-li:my-0.5",
                   "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
                   "prose-headings:text-muted-foreground/88 prose-strong:text-muted-foreground",
@@ -668,13 +669,15 @@ export function AgentActivityCluster({
   );
 
   const counts = countActivity(messages, fileEdits, collectCliRuns(messages), collectMcpRuns(messages));
+  const hasQuestion = messages.some((m) => m.questionData);
   const hasVisibleActivity =
     counts.reasoningSteps > 0
     || counts.toolCalls > 0
     || counts.cliCount > 0
     || counts.mcpCount > 0
     || counts.skillCount > 0
-    || counts.fileCount > 0;
+    || counts.fileCount > 0
+    || hasQuestion;
   const hasOnlyFileActivity = fileEdits.length > 0 && messages.every(messageHasOnlyFileActivity);
 
   const { parentMessages, subagentGroups } = useMemo(
@@ -829,35 +832,49 @@ function ActivityRoundContainer({
   onOpenFilePreview?: (path: string) => void;
   onOpenLink?: (url: string) => void;
 }) {
+  const questionTraces = round.traces.filter((t) => t.message.questionData);
+  const normalTraces = round.traces.filter((t) => !t.message.questionData);
+  const hasNormalContent = round.reasoning || normalTraces.length > 0;
+
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-2">
-      {round.reasoning && (
-        <ReasoningBlock
-          messages={round.reasoning.messages}
-          streaming={
-            isTurnStreaming
-            && reasoningIsLast
-            && round.reasoning.messages.some((m) => m.reasoningStreaming || m.isStreaming)
-          }
-          isLast={reasoningIsLast}
-          hasBodyBelow={false}
-          onOpenFilePreview={onOpenFilePreview}
-          onOpenLink={onOpenLink}
-        />
+    <>
+      {hasNormalContent && (
+        <div className="rounded-lg border border-border/60 bg-muted/25 px-3 py-2">
+          {round.reasoning && (
+            <ReasoningBlock
+              messages={round.reasoning.messages}
+              streaming={
+                isTurnStreaming
+                && reasoningIsLast
+                && round.reasoning.messages.some((m) => m.reasoningStreaming || m.isStreaming)
+              }
+              isLast={reasoningIsLast}
+              hasBodyBelow={false}
+              onOpenFilePreview={onOpenFilePreview}
+              onOpenLink={onOpenLink}
+            />
+          )}
+          {normalTraces.map((trace, traceIndex) => {
+            const isLastTrace = isLastRound && traceIndex === normalTraces.length - 1;
+            return (
+              <TraceActivityCard
+                key={`trace:${trace.message.id}`}
+                message={trace.message}
+                active={isTurnStreaming && isLastTrace}
+                cliAppsByName={cliAppsByName}
+                mcpPresetsByName={mcpPresetsByName}
+              />
+            );
+          })}
+        </div>
       )}
-      {round.traces.map((trace, traceIndex) => {
-        const isLastTrace = isLastRound && traceIndex === round.traces.length - 1;
-        return (
-          <TraceActivityCard
-            key={`trace:${trace.message.id}`}
-            message={trace.message}
-            active={isTurnStreaming && isLastTrace}
-            cliAppsByName={cliAppsByName}
-            mcpPresetsByName={mcpPresetsByName}
-          />
-        );
-      })}
-    </div>
+      {questionTraces.map((trace) => (
+        <AskUserQuestionCard
+          key={`question:${trace.message.id}`}
+          data={trace.message.questionData!}
+        />
+      ))}
+    </>
   );
 }
 

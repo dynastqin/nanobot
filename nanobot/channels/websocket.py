@@ -19,6 +19,7 @@ from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
+from nanobot.agent.tools.question_state import get_question_state_manager
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -335,7 +336,7 @@ class WebSocketChannel(BaseChannel):
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
 
-    def _cleanup_connection(self, connection: Any) -> None:
+    async def _cleanup_connection(self, connection: Any) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
         chat_ids = self._conn_chats.pop(connection, set())
         for cid in chat_ids:
@@ -347,6 +348,10 @@ class WebSocketChannel(BaseChannel):
                 self._subs.pop(cid, None)
         self._conn_default.pop(connection, None)
         self._conn_meta.pop(connection, None)
+        # Clean up any pending questions for the sessions tied to this connection.
+        manager = get_question_state_manager()
+        for cid in chat_ids:
+            await manager.cleanup_session(f"websocket:{cid}")
 
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
@@ -404,7 +409,7 @@ class WebSocketChannel(BaseChannel):
         try:
             await connection.send(raw)
         except ConnectionClosed:
-            self._cleanup_connection(connection)
+            await self._cleanup_connection(connection)
         except Exception as e:
             self.logger.warning("failed to send {} event: {}", event, e)
 
@@ -635,7 +640,7 @@ class WebSocketChannel(BaseChannel):
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
         finally:
-            self._cleanup_connection(connection)
+            await self._cleanup_connection(connection)
 
     # -- Inbound WebSocket envelopes ---------------------------------------
 
@@ -790,6 +795,28 @@ class WebSocketChannel(BaseChannel):
         if t == "transcribe_audio":
             event, payload = await webui_transcription_event(envelope)
             await self._send_event(connection, event, **payload)
+            return
+        if t == "answer_question":
+            question_id = envelope.get("question_id")
+            answers = envelope.get("answers")
+            if not isinstance(question_id, str) or not isinstance(answers, dict):
+                await self._send_event(
+                    connection, "error",
+                    detail="answer_question requires question_id (str) and answers (object)",
+                )
+                return
+            manager = get_question_state_manager()
+            resolved = await manager.resolve(question_id, answers)
+            if not resolved:
+                await self._send_event(
+                    connection, "error",
+                    detail="question not found or already answered",
+                )
+                return
+            await self._send_event(
+                connection, "ack",
+                type="answer_question", question_id=question_id,
+            )
             return
         if t == "message":
             cid = envelope.get("chat_id")
@@ -972,7 +999,7 @@ class WebSocketChannel(BaseChannel):
         try:
             await connection.send(raw)
         except ConnectionClosed:
-            self._cleanup_connection(connection)
+            await self._cleanup_connection(connection)
             self.logger.warning("connection gone{}", label)
         except Exception:
             self.logger.exception("send failed{}", label)

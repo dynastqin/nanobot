@@ -78,6 +78,26 @@ export interface UIMessage {
   subagentTaskId?: string;
   /** 子代理任务标题，用于分组标签展示 */
   subagentTitle?: string;
+  /** ``ask_user_question`` payload when agent_ui.kind is "ask_user_question". */
+  questionData?: AskUserQuestionPayload;
+}
+
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+  recommend?: boolean;
+}
+
+export interface AskUserQuestionData {
+  id: string;
+  question: string;
+  options: AskUserQuestionOption[];
+  multiSelect?: boolean;
+}
+
+export interface AskUserQuestionPayload {
+  question_id: string;
+  questions: AskUserQuestionData[];
 }
 
 export interface UICliAppAttachment {
@@ -1027,6 +1047,7 @@ export type Outbound =
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
+  | { type: "answer_question"; question_id: string; answers: Record<string, string>; chat_id?: string }
   | {
       type: "message";
       chat_id: string;

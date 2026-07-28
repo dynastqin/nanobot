@@ -11,6 +11,8 @@ import {
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
+  AskUserQuestionData,
+  AskUserQuestionPayload,
   InboundEvent,
   OutboundCliAppMention,
   OutboundImageGeneration,
@@ -960,6 +962,30 @@ export function useNanobotStream(
           suppressStreamUntilTurnEndRef.current &&
           (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning")
         ) {
+          return;
+        }
+        // ``ask_user_question`` agent UI — emit a trace row carrying the
+        // question payload so the activity cluster can render a card.
+        const agentUi = ev.agent_ui as Record<string, unknown> | undefined;
+        if (agentUi?.kind === "ask_user_question") {
+          const questionData = {
+            question_id: agentUi.question_id as string,
+            questions: agentUi.questions as AskUserQuestionData[],
+          } satisfies AskUserQuestionPayload;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant" as const,
+              content: "",
+              kind: "trace" as const,
+              createdAt: Date.now(),
+              questionData,
+              turnId: ev.turn_id,
+              turnPhase: "activity" as const,
+              turnSeq: ev.turn_seq,
+            },
+          ]);
           return;
         }
         // Back-compat: a legacy ``kind: "reasoning"`` message (no streaming
