@@ -120,6 +120,8 @@ def _sanitize_name(name: str) -> str:
     """Sanitize an MCP-derived name for model API compatibility."""
     return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
 
+def _sanitize_tool_name(server_name: str, tool_name: str) -> str:
+    return _sanitize_name(f"mcp_{server_name}_{tool_name}")
 
 def _is_transient(exc: BaseException) -> bool:
     """Check if an exception looks like a transient connection error."""
@@ -321,7 +323,7 @@ class MCPToolWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
-        self._name = _sanitize_name(f"mcp_{server_name}_{tool_def.name}")
+        self._name = _sanitize_tool_name(server_name,tool_def.name)
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
@@ -338,6 +340,14 @@ class MCPToolWrapper(_MCPWrapperBase):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
+
+    @property
+    def mcp_server(self) -> str:
+        return self._server_name
+
+    @property
+    def mcp_tool(self) -> str:
+        return self._original_name
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
@@ -786,9 +796,9 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
+            available_wrapped_names = [_sanitize_tool_name(name,tool_def.name) for tool_def in tools.tools]
             for tool_def in tools.tools:
-                wrapped_name = _sanitize_name(f"mcp_{name}_{tool_def.name}")
+                wrapped_name = _sanitize_tool_name(name,tool_def.name)
                 if (
                     not allow_all_tools
                     and tool_def.name not in enabled_tools

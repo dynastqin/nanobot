@@ -755,6 +755,7 @@ class AgentLoop:
             tool_hint_max_length=self.tool_hint_max_length,
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
+            tool_registry=tools or self.tools,
         )
         run_hooks = [*self._extra_hooks, CleanupHook(), *(hooks or [])]
         hook: AgentHook = loop_hook

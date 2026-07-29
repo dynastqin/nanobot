@@ -251,6 +251,8 @@ export interface ToolProgressEvent {
   files?: unknown[];
   embeds?: unknown[];
   skill_load?: { name: string };
+  mcp_server?: string;
+  mcp_tool?: string;
 }
 
 export interface UIFileEdit {

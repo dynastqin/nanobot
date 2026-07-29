@@ -39,6 +39,7 @@ class AgentProgressHook(AgentHook):
         tool_hint_max_length: int = 40,
         set_tool_context: Callable[..., None] | None = None,
         on_iteration: Callable[[int], None] | None = None,
+        tool_registry: Any = None,
     ) -> None:
         super().__init__(reraise=True)
         self._on_progress = on_progress
@@ -52,6 +53,7 @@ class AgentProgressHook(AgentHook):
         self._tool_hint_max_length = tool_hint_max_length
         self._set_tool_context = set_tool_context
         self._on_iteration = on_iteration
+        self._tool_registry = tool_registry
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
         self._reasoning_open = False
@@ -99,6 +101,21 @@ class AgentProgressHook(AgentHook):
             return None
         return {"name": m.group(1)}
 
+    def _extract_mcp_metadata(self, tool_name: str) -> dict[str, str]:
+        if self._tool_registry is None:
+            return {}
+        tool = self._tool_registry.get(tool_name)
+        if tool is None:
+            return {}
+        result: dict[str, str] = {}
+        server = getattr(tool, "mcp_server", None)
+        if server:
+            result["mcp_server"] = server
+        mcp_tool = getattr(tool, "mcp_tool", None)
+        if mcp_tool:
+            result["mcp_tool"] = mcp_tool
+        return result
+
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         prev_clean = strip_think(self._stream_buf)
         self._stream_buf += delta
@@ -143,6 +160,9 @@ class AgentProgressHook(AgentHook):
                 skill_load = self._extract_skill_load(tc)
                 if skill_load:
                     event["skill_load"] = skill_load
+                mcp_meta = self._extract_mcp_metadata(tc.name)
+                if mcp_meta:
+                    event.update(mcp_meta)
             await invoke_on_progress(
                 self._on_progress,
                 tool_hint,
@@ -192,6 +212,9 @@ class AgentProgressHook(AgentHook):
                     skill_load = self._extract_skill_load(tc)
                     if skill_load:
                         event["skill_load"] = skill_load
+                    mcp_meta = self._extract_mcp_metadata(tc.name)
+                    if mcp_meta:
+                        event.update(mcp_meta)
                 await invoke_on_progress(
                     self._on_progress,
                     "",

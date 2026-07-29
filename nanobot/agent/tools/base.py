@@ -173,6 +173,14 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
+    @property
+    def mcp_server(self) -> str | None:
+        return None
+
+    @property
+    def mcp_tool(self) -> str | None:
+        return None
+
     # --- Plugin metadata ---
 
     config_key: str = ""

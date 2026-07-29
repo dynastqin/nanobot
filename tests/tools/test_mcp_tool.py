@@ -15,6 +15,7 @@ from nanobot.agent.tools.mcp import (
     MCPToolWrapper,
     _normalize_windows_stdio_command,
     _sanitize_name,
+    _sanitize_tool_name,
     connect_mcp_servers,
 )
 from nanobot.agent.tools.registry import ToolRegistry
@@ -993,6 +994,29 @@ async def test_connect_registers_resources_and_prompts(
     assert "mcp_test_tool_a" in registry.tool_names
     assert "mcp_test_resource_res_b" in registry.tool_names
     assert "mcp_test_prompt_prompt_c" in registry.tool_names
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_tool_name tests
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_tool_name_simple() -> None:
+    assert _sanitize_tool_name("srv", "my_tool") == "mcp_srv_my_tool"
+
+
+def test_sanitize_tool_name_with_spaces() -> None:
+    assert _sanitize_tool_name("my server", "My Tool") == "mcp_my_server_My_Tool"
+
+
+def test_sanitize_tool_name_with_underscores_in_both() -> None:
+    """server_name and tool_name both contain underscores — must be parseable back."""
+    result = _sanitize_tool_name("V5_get_user", "get_user_info")
+    assert result == "mcp_V5_get_user_get_user_info"
+
+
+def test_sanitize_tool_name_with_special_chars() -> None:
+    assert _sanitize_tool_name("foo.bar", "baz@qux") == "mcp_foo_bar_baz_qux"
 
 
 # ---------------------------------------------------------------------------

@@ -1640,12 +1640,12 @@ function mcpRunFromToolName(
 ): McpRunSummary | null {
   const match = MCP_TOOL_NAME_RE.exec(toolName);
   if (!match) return null;
-  const presetName = match[1].toLowerCase();
+  const presetName = (match[1] || "").toLowerCase();
   return {
     key: options.key,
     presetName,
     displayName: titleFromPresetName(presetName),
-    toolName: match[2],
+    toolName: match[2] || "",
     argsPreview: previewMcpArgs(argsObject),
     status: options.status,
     error: options.error,
@@ -1668,15 +1668,27 @@ function parseMcpRunTrace(line: string, status: McpRunStatus = "running"): McpRu
 }
 
 function mcpRunFromEvent(event: ToolProgressEvent): McpRunSummary | null {
+  const argsObject = parseToolEventArguments(event);
+  const key = event.call_id ? `call:${event.call_id}` : `${toolEventName(event)}:${JSON.stringify(argsObject)}`;
+  const status = cliRunStatusFromPhase(event.phase);
+  const error = cliRunError(event);
+
+  if (event.mcp_server && event.mcp_tool) {
+    const presetName = event.mcp_server.toLowerCase();
+    return {
+      key,
+      presetName,
+      displayName: titleFromPresetName(presetName),
+      toolName: event.mcp_tool,
+      argsPreview: previewMcpArgs(argsObject),
+      status,
+      error,
+    };
+  }
+
   const name = toolEventName(event);
   if (!MCP_TOOL_NAME_RE.test(name)) return null;
-  const argsObject = parseToolEventArguments(event);
-  const key = event.call_id ? `call:${event.call_id}` : `${name}:${JSON.stringify(argsObject)}`;
-  return mcpRunFromToolName(name, argsObject, {
-    key,
-    status: cliRunStatusFromPhase(event.phase),
-    error: cliRunError(event),
-  });
+  return mcpRunFromToolName(name, argsObject, { key, status, error });
 }
 
 function mcpRunMapByTraceLine(message: UIMessage): Map<string, McpRunSummary> {
