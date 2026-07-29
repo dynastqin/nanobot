@@ -984,22 +984,11 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function traceLabelColor(label: string): string {
-  if (label.startsWith("Searching")) {
-    return "text-violet-600 dark:text-violet-400";
-  }
-  switch (label) {
-    case "Reading":
-      return "text-sky-600 dark:text-sky-400";
-    case "Command":
-      return "text-amber-600 dark:text-amber-400";
-    case "Using":
-      return "text-sky-600 dark:text-sky-400";
-    case "Done":
-      return "text-emerald-500/75";
-    default:
-      return "text-muted-foreground/85";
-  }
+function traceLabelColor(kind: string): string {
+  if (kind === "search") return "text-violet-600 dark:text-violet-400";
+  if (kind === "done") return "text-emerald-500/75";
+  if (kind === "tool") return "text-sky-600 dark:text-sky-400";
+  return "text-muted-foreground/85";
 }
 
 function ActivityTraceRow({
@@ -1024,18 +1013,13 @@ function ActivityTraceRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const showDetails = toolEvent && hasToolCallDetails(toolEvent);
 
-  const pastTense: Record<string, string> = { Searching: "Searched", Reading: "Readed", Using: "Used" };
-  const displayLabel = !active && !trace.error ? (pastTense[trace.label] ?? trace.label) : trace.label;
-
-  const labelNode = trace.provider
-    ? <>{displayLabel}<span className="font-normal text-muted-foreground/55"> [{trace.provider}]</span></>
-    : displayLabel;
+  const displayLabel = trace.label;
 
   const labelColor = trace.error
     ? "text-red-600 dark:text-red-400"
-    : !active && (trace.label === "Command" || trace.label === "Reading" || trace.label === "Using" || trace.label === "Searching")
+    : !active
       ? "text-emerald-500/75"
-      : traceLabelColor(trace.provider ? `Searching [${trace.provider}]` : trace.label);
+      : traceLabelColor(trace.kind);
 
   return (
     <ActivityStep
@@ -1043,7 +1027,7 @@ function ActivityTraceRow({
       marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={active} />}
       active={active && trace.kind !== "done" && !trace.error}
       tone={trace.error ? "error" : trace.kind === "done" ? "success" : active ? "active" : "neutral"}
-      label={labelNode}
+      label={displayLabel}
       detail={trace.detail}
       labelClassName={labelColor}
       onClick={showDetails ? () => setDetailsOpen(!detailsOpen) : undefined}
@@ -1107,7 +1091,6 @@ interface TraceDescription {
   detail: string;
   url?: string;
   host?: string;
-  provider?: string;
   error?: boolean;
 }
 
@@ -1164,6 +1147,20 @@ function extractProviderFromResult(result: unknown): string | undefined {
   if (typeof result !== "string") return undefined;
   const match = /^\[provider:\s*([^\]]+)\]/.exec(result);
   return match?.[1] || undefined;
+}
+
+function extractQuestionText(event?: ToolProgressEvent): string {
+  const args = parseToolEventArguments(event);
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "";
+  const record = args as Record<string, unknown>;
+  const questions = Array.isArray(record.questions) ? record.questions : [];
+  const texts = questions
+    .map((q) => (q && typeof q === "object" ? (q as Record<string, unknown>).question : undefined))
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .map((t) => t.trim());
+  if (!texts.length) return "";
+  const joined = texts.join(" / ");
+  return truncateMiddle(joined, 80);
 }
 
 function extractPlanTitle(result: unknown): string {
@@ -1234,11 +1231,15 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
   const errored = toolEventHasError(toolEvent);
   if (name === "spawn") {
     const spawnLabel = extractArgField(toolEvent, "label");
-    return { kind: "tool", label: "Using", detail: spawnLabel ? `spawn ${spawnLabel}` : "spawn", error: errored };
+    return { kind: "tool", label: "spawn", detail: spawnLabel || "", error: errored };
   }
   if (name === "long_task") {
     const summary = extractArgField(toolEvent, "ui_summary");
-    return { kind: "tool", label: "Using", detail: summary ? `long_task ${summary}` : "long_task", error: errored };
+    return { kind: "tool", label: "long_task", detail: summary || "", error: errored };
+  }
+  if (name === "ask_user_question") {
+    const questionText = extractQuestionText(toolEvent);
+    return { kind: "tool", label: "ask_user_question", detail: questionText, error: errored };
   }
   if (/^plan$/i.test(name)) {
     const args = parseToolEventArguments(toolEvent);
@@ -1246,19 +1247,23 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
     const action = typeof record.action === "string" && record.action.trim() ? record.action.trim() : "";
     const title = (typeof record.title === "string" && record.title.trim())
       || extractPlanTitle(toolEvent?.result);
-    const detail = `plan · ${action
-      ? (title ? `${action}(${truncateMiddle(title, 60)})` : action)
-      : (title ? truncateMiddle(title, 60) : name)}`;
-    return { kind: "tool", label: "Using", detail, error: errored };
+    const detail = action
+      ? (title ? `· ${action} ${truncateMiddle(title, 60)}` : `· ${action}`)
+      : (title ? `· ${truncateMiddle(title, 60)}` : "");
+    return { kind: "tool", label: "plan", detail, error: errored };
   }
   if (/search/i.test(name)) {
     const provider = extractProviderFromResult(toolEvent?.result);
-    return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed), provider, error: errored };
+    const queryDetail = previewTraceDetail(args, trimmed);
+    const detail = provider
+      ? `· ${provider} ${queryDetail}`
+      : queryDetail ? `· ${queryDetail}` : "";
+    return { kind: "search", label: name, detail, error: errored };
   }
   if (/fetch|read|open/i.test(name) || plainWebReadTrace) {
     return {
       kind: "tool",
-      label: "Reading",
+      label: name,
       detail: webDetail || previewTraceDetail(args, trimmed),
       url: parsedUrl?.href,
       host: parsedUrl ? displayHost(parsedUrl.hostname) : undefined,
@@ -1268,14 +1273,14 @@ function describeTraceLine(line: string, toolEvent?: ToolProgressEvent): TraceDe
   if (isShellTraceName(name)) {
     return {
       kind: "tool",
-      label: "Command",
+      label: name,
       detail: previewShellTraceDetail(args, trimmed),
       error: errored,
     };
   }
   if (name) {
     const argsDetail = previewToolEventDetail(toolEvent) || previewGenericArgs(toolEvent);
-    return { kind: "tool", label: "Using", detail: argsDetail ? `${name}(${argsDetail})` : name, error: errored };
+    return { kind: "tool", label: name, detail: argsDetail || "", error: errored };
   }
   if (/done|complete|success/i.test(trimmed)) {
     return { kind: "done", label: "Done", detail: trimmed };
@@ -1605,14 +1610,6 @@ function collectCliRuns(messages: UIMessage[]): CliRunSummary[] {
   return [...runsByKey.values()];
 }
 
-function titleFromPresetName(name: string): string {
-  return name
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ") || name;
-}
-
 function previewScalar(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -1644,7 +1641,7 @@ function mcpRunFromToolName(
   return {
     key: options.key,
     presetName,
-    displayName: titleFromPresetName(presetName),
+    displayName: match[1] || "",
     toolName: match[2] || "",
     argsPreview: previewMcpArgs(argsObject),
     status: options.status,
@@ -1678,7 +1675,7 @@ function mcpRunFromEvent(event: ToolProgressEvent): McpRunSummary | null {
     return {
       key,
       presetName,
-      displayName: titleFromPresetName(presetName),
+      displayName: event.mcp_server,
       toolName: event.mcp_tool,
       argsPreview: previewMcpArgs(argsObject),
       status,
@@ -1738,26 +1735,6 @@ function displayCliArg(arg: string): string {
 function formatCliArgs(run: CliRunSummary): string {
   const args = [...(run.json ? ["--json"] : []), ...run.args].map(displayCliArg);
   return args.join(" ");
-}
-
-function cliRunLabelKey(run: CliRunSummary, active: boolean): string {
-  if (run.status === "error") return "message.cliRunFailed";
-  return active && run.status === "running" ? "message.cliRunRunning" : "message.cliRunRan";
-}
-
-function cliRunLabelDefault(run: CliRunSummary, active: boolean): string {
-  if (run.status === "error") return "Failed";
-  return active && run.status === "running" ? "Using" : "Used";
-}
-
-function mcpRunLabelKey(run: McpRunSummary, active: boolean): string {
-  if (run.status === "error") return "message.mcpRunFailed";
-  return active && run.status === "running" ? "message.mcpRunRunning" : "message.mcpRunRan";
-}
-
-function mcpRunLabelDefault(run: McpRunSummary, active: boolean): string {
-  if (run.status === "error") return "Failed";
-  return active && run.status === "running" ? "Using" : "Used";
 }
 
 function fileActivityVerb(editing: boolean, failed: boolean, deleted: boolean): string {
@@ -1946,7 +1923,6 @@ function CliTextIcon({ className }: { className?: string }) {
 }
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
-  const { t } = useTranslation();
   const [logoIndex, setLogoIndex] = useState(0);
   const args = formatCliArgs(run);
   const failed = run.status === "error";
@@ -1954,10 +1930,8 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const color = failed ? "#DC2626" : app?.brand_color || "#0891B2";
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const logoUrl = logoUrls[logoIndex];
-  const labelText = t(cliRunLabelKey(run, active), {
-    defaultValue: cliRunLabelDefault(run, active),
-  });
-  const detail = `@${run.name}${args ? ` ${args}` : ""}`;
+  const labelText = `@${run.name}`;
+  const detail = args || undefined;
   const labelColor = failed
     ? "text-red-600 dark:text-red-400"
     : rowActive
@@ -2028,7 +2002,6 @@ function McpRunGroup({
 }
 
 function McpRunRow({ run, active, preset, toolEvent }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo; toolEvent?: ToolProgressEvent }) {
-  const { t } = useTranslation();
   const [logoIndex, setLogoIndex] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const failed = run.status === "error";
@@ -2037,10 +2010,8 @@ function McpRunRow({ run, active, preset, toolEvent }: { run: McpRunSummary; act
   const logoUrls = useMemo(() => logoFallbackUrls(preset?.logo_url), [preset?.logo_url]);
   const logoUrl = logoUrls[logoIndex];
   const displayName = preset?.display_name || run.displayName;
-  const labelText = t(mcpRunLabelKey(run, active), {
-    defaultValue: mcpRunLabelDefault(run, active),
-  });
-  const detail = `${displayName} · ${run.toolName}${run.argsPreview ? `(${run.argsPreview})` : ""}`;
+  const labelText = displayName;
+  const detail = `· ${run.toolName}${run.argsPreview ? ` ${run.argsPreview}` : ""}`;
   const labelColor = failed
     ? "text-red-600 dark:text-red-400"
     : rowActive

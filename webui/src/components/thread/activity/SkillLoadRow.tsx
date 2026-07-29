@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Zap } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { hasToolCallDetails, ToolCallDetailContent } from "@/components/thread/activity/ToolCallDetail";
@@ -14,20 +13,14 @@ export interface SkillLoadRowProps {
 }
 
 export function SkillLoadRow({ name, active, phase = "start", toolEvent }: SkillLoadRowProps) {
-  const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const running = phase === "start" && active;
   const failed = phase === "error";
   const done = phase === "end";
   const showDetails = done && toolEvent && hasToolCallDetails(toolEvent);
 
-  const label = failed
-    ? t("message.skillLoadFailed", { defaultValue: "Skill" })
-    : running
-      ? t("message.skillLoadLoading", { defaultValue: "Skill" })
-      : t("message.skillLoadLoaded", { defaultValue: "Skill-loaded" });
-
-  const detail = running || done || failed ? name : undefined;
+  const label = "skill_load";
+  const detail = name || undefined;
 
   return (
     <ActivityStep

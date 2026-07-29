@@ -306,7 +306,7 @@ class SubagentManager:
                         metadata=meta,
                     ))
 
-                progress_hook = AgentProgressHook(on_progress=_subagent_progress)
+                progress_hook = AgentProgressHook(on_progress=_subagent_progress, tool_registry=tools)
                 subagent_hook = _SubagentHook(task_id, status)
                 hook = CompositeHook([progress_hook, subagent_hook])
 
