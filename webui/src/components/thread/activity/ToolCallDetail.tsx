@@ -18,14 +18,18 @@ function formatJson(value: unknown): string {
 export function JsonBlock({ value, label }: { value: unknown; label: string }) {
   const [copied, setCopied] = useState(false);
   const json = formatJson(value);
-  if (!json) return null;
 
   const handleCopy = useCallback(() => {
+    if (!json) return;
     navigator.clipboard.writeText(json).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      // clipboard write failed — silently ignore
     });
   }, [json]);
+
+  if (!json) return null;
 
   return (
     <div className="mt-1">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Code2, Copy, Download, Eye, Loader2, Minimize2, CircleAlert, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -33,12 +33,14 @@ export function FileFullscreenPreview({
   const [copied, setCopied] = useState(false);
   const [pathCopied, setPathCopied] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
     setViewMode("preview");
-    fetchFilePreview(token, sessionKey, path)
+    fetchFilePreview(tokenRef.current, sessionKey, path)
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
       })
@@ -48,7 +50,7 @@ export function FileFullscreenPreview({
         setState({ status: "error", message });
       });
     return () => { cancelled = true; };
-  }, [path, sessionKey, t, token]);
+  }, [path, sessionKey]);
 
   const handleCopy = useCallback(async () => {
     if (state.status !== "ready") return;

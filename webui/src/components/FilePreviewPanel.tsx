@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { AlertCircle, Code2, Eye, FileText, Loader2, Minimize2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -49,6 +49,8 @@ export function FilePreviewPanel({
   const [supportsHoverClose, setSupportsHoverClose] = useState(supportsHoverCloseControl);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [pathCopied, setPathCopied] = useState(false);
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -72,7 +74,7 @@ export function FilePreviewPanel({
     let cancelled = false;
     setState({ status: "loading" });
     setViewMode("preview");
-    fetchFilePreview(token, sessionKey, path)
+    fetchFilePreview(tokenRef.current, sessionKey, path)
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
       })
@@ -90,7 +92,7 @@ export function FilePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [path, sessionKey, t, token]);
+  }, [path, sessionKey]);
 
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
   const previewPath = state.status === "ready" ? state.payload.path : displayPath;
